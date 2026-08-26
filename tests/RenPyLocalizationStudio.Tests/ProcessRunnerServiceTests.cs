@@ -42,7 +42,7 @@ public sealed class ProcessRunnerServiceTests
     public async Task Execute_无输出达到阈值生成警告()
     {
         var progress = new CollectingProgress();
-        var result = await ExecuteAsync("idle", TimeSpan.FromSeconds(10), CancellationToken.None, progress, TimeSpan.FromMilliseconds(50));
+        var result = await ExecuteAsync("idle", TimeSpan.FromSeconds(10), CancellationToken.None, progress, TimeSpan.FromMilliseconds(100));
 
         Assert.Equal(OperationStatus.SucceededWithWarnings, result.Status);
         Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == "PROCESS_IDLE");

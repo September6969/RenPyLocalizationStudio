@@ -15,7 +15,7 @@ switch (mode)
         await Task.Delay(TimeSpan.FromMinutes(5));
         break;
     case "idle":
-        await Task.Delay(400);
+        await Task.Delay(1500);
         Console.WriteLine("done");
         break;
 }
