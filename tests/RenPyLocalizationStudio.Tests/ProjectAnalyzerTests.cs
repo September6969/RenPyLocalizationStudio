@@ -26,7 +26,7 @@ translate schinese strings:
     new "确认"
 """;
         await using var project = await TestFiles.CreateProjectAsync(source, tl);
-        var snapshot = await new ProjectAnalyzer().AnalyzeAsync(project.Root, "schinese");
+        var snapshot = await TestFiles.AnalyzeAsync(project.Root);
 
         var entry = Assert.Single(snapshot.SharedStrings);
         Assert.Equal("确认", entry.Translation);
@@ -50,7 +50,7 @@ translate schinese strings:
         var secondPath = Path.Combine(project.Root, "game", "second.rpy");
         await File.WriteAllTextAsync(secondPath, "label second:\n    return\n", new System.Text.UTF8Encoding(false));
 
-        var snapshot = await new ProjectAnalyzer().AnalyzeAsync(project.Root, "schinese");
+        var snapshot = await TestFiles.AnalyzeAsync(project.Root);
         var jump = Assert.Single(snapshot.Graph.Nodes, node => node.Kind == FlowNodeKind.Jump);
         var target = snapshot.Graph.Labels["second"];
 
@@ -76,7 +76,7 @@ translate schinese strings:
 """;
         await using var project = await TestFiles.CreateProjectAsync(source, tl);
 
-        var snapshot = await new ProjectAnalyzer().AnalyzeAsync(project.Root, "schinese");
+        var snapshot = await TestFiles.AnalyzeAsync(project.Root);
         var choice = Assert.Single(snapshot.Graph.Nodes, node => node.Kind == FlowNodeKind.Choice);
         var unit = Assert.Single(snapshot.TranslationUnits);
 
@@ -99,7 +99,7 @@ translate schinese strings:
 """;
         await using var project = await TestFiles.CreateProjectAsync(source, tl);
 
-        var snapshot = await new ProjectAnalyzer().AnalyzeAsync(project.Root, "schinese");
+        var snapshot = await TestFiles.AnalyzeAsync(project.Root);
 
         Assert.Single(snapshot.SharedStrings);
         Assert.DoesNotContain(snapshot.Diagnostics, diagnostic => diagnostic.Code == "UNBOUND_TRANSLATION");
@@ -118,7 +118,7 @@ translate schinese style endscene_stats is text:
 """;
         await using var project = await TestFiles.CreateProjectAsync(source, tl);
 
-        var snapshot = await new ProjectAnalyzer().AnalyzeAsync(project.Root, "schinese");
+        var snapshot = await TestFiles.AnalyzeAsync(project.Root);
 
         Assert.DoesNotContain(snapshot.TranslationUnits, unit => unit.IsUnboundFlowTranslation);
         Assert.DoesNotContain(snapshot.Diagnostics, diagnostic => diagnostic.Code == "UNBOUND_TRANSLATION");

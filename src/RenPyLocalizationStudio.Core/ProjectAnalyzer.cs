@@ -5,74 +5,49 @@ public sealed class ProjectAnalyzer
     private readonly RenPySourceParser _sourceParser = new();
     private readonly TlParser _tlParser = new();
 
-    public static IReadOnlyList<string> FindLanguages(string projectRoot)
+    internal ProjectSnapshot Analyze(
+        string projectRoot,
+        string gameDirectory,
+        string language,
+        IReadOnlyList<(Utf8TextFile File, string RelativePath)> sourceFiles,
+        IReadOnlyList<(Utf8TextFile File, string RelativePath)> translationFiles)
     {
-        var gameDirectory = ResolveGameDirectory(projectRoot);
-        var tlDirectory = Path.Combine(gameDirectory, "tl");
-        return Directory.Exists(tlDirectory)
-            ? Directory.EnumerateDirectories(tlDirectory).Select(Path.GetFileName).Where(name => !string.IsNullOrWhiteSpace(name)).Cast<string>().Order().ToArray()
-            : [];
-    }
-
-    public async Task<ProjectSnapshot> AnalyzeAsync(string projectRoot, string language, CancellationToken cancellationToken = default)
-    {
-        var root = Path.GetFullPath(projectRoot);
-        var gameDirectory = ResolveGameDirectory(root);
-        var languageDirectory = Path.Combine(gameDirectory, "tl", language);
-        if (!Directory.Exists(languageDirectory))
-        {
-            throw new DirectoryNotFoundException($"找不到翻译目录：{languageDirectory}");
-        }
-
         var snapshot = new ProjectSnapshot
         {
-            ProjectRoot = root,
+            ProjectRoot = projectRoot,
             GameDirectory = gameDirectory,
             Language = language
         };
 
-        var sourceFiles = Directory.EnumerateFiles(gameDirectory, "*.rpy", SearchOption.AllDirectories)
-            .Where(path => !IsUnderDirectory(path, Path.Combine(gameDirectory, "tl")))
-            .Order(StringComparer.OrdinalIgnoreCase)
-            .ToArray();
-        foreach (var sourcePath in sourceFiles)
+        foreach (var source in sourceFiles)
         {
-            cancellationToken.ThrowIfCancellationRequested();
             try
             {
-                var file = await Utf8TextFile.ReadAsync(sourcePath, cancellationToken).ConfigureAwait(false);
-                var relativePath = Path.GetRelativePath(root, sourcePath);
-                snapshot.Sources.Add(_sourceParser.Parse(file, relativePath));
+                snapshot.Sources.Add(_sourceParser.Parse(source.File, source.RelativePath));
             }
-            catch (Exception exception) when (exception is IOException or InvalidDataException or UnauthorizedAccessException)
+            catch (Exception exception) when (exception is InvalidDataException or ArgumentException)
             {
                 snapshot.Diagnostics.Add(new Diagnostic(
                     DiagnosticSeverity.Error,
-                    "SOURCE_READ_FAILED",
+                    "SOURCE_PARSE_FAILED",
                     exception.Message,
-                    TextUtilities.NormalizePath(Path.GetRelativePath(root, sourcePath))));
+                    TextUtilities.NormalizePath(source.RelativePath)));
             }
         }
 
-        var tlFiles = Directory.EnumerateFiles(languageDirectory, "*.rpy", SearchOption.AllDirectories)
-            .Order(StringComparer.OrdinalIgnoreCase)
-            .ToArray();
-        foreach (var tlPath in tlFiles)
+        foreach (var translation in translationFiles)
         {
-            cancellationToken.ThrowIfCancellationRequested();
             try
             {
-                var file = await Utf8TextFile.ReadAsync(tlPath, cancellationToken).ConfigureAwait(false);
-                var relativePath = Path.GetRelativePath(languageDirectory, tlPath);
-                snapshot.TlDocuments.Add(_tlParser.Parse(file, relativePath, language));
+                snapshot.TlDocuments.Add(_tlParser.Parse(translation.File, translation.RelativePath, language));
             }
-            catch (Exception exception) when (exception is IOException or InvalidDataException or UnauthorizedAccessException)
+            catch (Exception exception) when (exception is InvalidDataException or ArgumentException)
             {
                 snapshot.Diagnostics.Add(new Diagnostic(
                     DiagnosticSeverity.Error,
-                    "TL_READ_FAILED",
+                    "TL_PARSE_FAILED",
                     exception.Message,
-                    TextUtilities.NormalizePath(Path.GetRelativePath(root, tlPath))));
+                    TextUtilities.NormalizePath(translation.RelativePath)));
             }
         }
 
@@ -284,23 +259,4 @@ public sealed class ProjectAnalyzer
         return firstQuote >= 0 ? TextUtilities.UnescapeRenPyString(statement[(firstQuote + 1)..lastQuote]) : null;
     }
 
-    private static string ResolveGameDirectory(string projectRoot)
-    {
-        var fullPath = Path.GetFullPath(projectRoot);
-        var gameDirectory = string.Equals(Path.GetFileName(fullPath), "game", StringComparison.OrdinalIgnoreCase)
-            ? fullPath
-            : Path.Combine(fullPath, "game");
-        if (!Directory.Exists(gameDirectory))
-        {
-            throw new DirectoryNotFoundException($"找不到 game 目录：{gameDirectory}");
-        }
-
-        return gameDirectory;
-    }
-
-    private static bool IsUnderDirectory(string path, string directory)
-    {
-        var relative = Path.GetRelativePath(directory, path);
-        return !relative.StartsWith("..", StringComparison.Ordinal) && !Path.IsPathRooted(relative);
-    }
 }

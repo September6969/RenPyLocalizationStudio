@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using RenPyLocalizationStudio.Core;
+using RenPyLocalizationStudio.Core.Services;
 
 namespace RenPyLocalizationStudio.Tests;
 
@@ -34,6 +35,25 @@ internal static class TestFiles
         await WriteUtf8Async(tlPath, tl, bom, newLine);
         return new TemporaryProject(root, tlPath);
     }
+
+    public static async Task<ProjectSnapshot> AnalyzeAsync(string root, string language = "schinese", CancellationToken cancellationToken = default)
+    {
+        var result = await new ProjectAnalysisService(new FileSystemService()).ExecuteAsync(
+            new ProjectAnalysisRequest(root, language),
+            new Progress<ToolOperationProgress>(),
+            cancellationToken);
+        return Assert.IsType<ProjectSnapshot>(result.Value);
+    }
+
+    public static Task<OperationResult<SaveSummary>> SaveAsync(
+        ProjectSnapshot snapshot,
+        bool refreshAnnotations,
+        bool allowWarnings,
+        CancellationToken cancellationToken = default) =>
+        new ProjectWriter(new FileSystemService()).ExecuteAsync(
+            new ProjectSaveRequest(snapshot, refreshAnnotations, allowWarnings),
+            new Progress<ToolOperationProgress>(),
+            cancellationToken);
 
     private static async Task WriteUtf8Async(string path, string text, bool bom, string newLine)
     {

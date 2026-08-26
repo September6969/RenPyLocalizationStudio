@@ -3,16 +3,22 @@ using RenPyLocalizationStudio.Core.Services;
 
 namespace RenPyLocalizationStudio.Core;
 
-public sealed record SaveResult(int SavedFiles, IReadOnlyList<Diagnostic> Diagnostics);
 public sealed record ProjectSaveRequest(ProjectSnapshot Snapshot, bool RefreshAnnotations, bool AllowWarnings);
 public sealed record SaveSummary(int SavedFiles);
+public interface IProjectSaveService : IAsyncOperationService<ProjectSaveRequest, SaveSummary>
+{
+    IReadOnlyList<Diagnostic> Validate(ProjectSnapshot snapshot);
+}
 
-public sealed class ProjectWriter : IAsyncOperationService<ProjectSaveRequest, SaveSummary>
+public sealed class ProjectWriter : IProjectSaveService
 {
     private const string BeginMarker = "# RFT-FLOW-BEGIN";
     private const string EndMarker = "# RFT-FLOW-END";
     private readonly TlParser _tlParser = new();
     private readonly TranslationValidator _validator = new();
+    private readonly IFileSystemService _fileSystem;
+
+    public ProjectWriter(IFileSystemService fileSystem) => _fileSystem = fileSystem;
 
     public async Task<OperationResult<SaveSummary>> ExecuteAsync(
         ProjectSaveRequest request,
@@ -22,13 +28,7 @@ public sealed class ProjectWriter : IAsyncOperationService<ProjectSaveRequest, S
         try
         {
             progress.Report(ToolOperationProgress.Create(ToolOperationStage.Validating, "正在验证翻译文件"));
-            var result = await SaveAsync(request.Snapshot, request.RefreshAnnotations, request.AllowWarnings, cancellationToken).ConfigureAwait(false);
-            var status = result.Diagnostics.Any(x => x.Severity == DiagnosticSeverity.Error)
-                ? OperationStatus.Failed
-                : result.Diagnostics.Any(x => x.Severity == DiagnosticSeverity.Warning)
-                    ? OperationStatus.SucceededWithWarnings : OperationStatus.Succeeded;
-            progress.Report(ToolOperationProgress.Create(ToolOperationStage.Completed, $"已保存 {result.SavedFiles} 个文件", result.SavedFiles, result.SavedFiles));
-            return new OperationResult<SaveSummary>(status, new SaveSummary(result.SavedFiles), result.Diagnostics);
+            return await SaveCoreAsync(request, progress, cancellationToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
@@ -40,12 +40,12 @@ public sealed class ProjectWriter : IAsyncOperationService<ProjectSaveRequest, S
         }
     }
 
-    public async Task<SaveResult> SaveAsync(
-        ProjectSnapshot snapshot,
-        bool refreshAnnotations,
-        bool allowWarnings,
-        CancellationToken cancellationToken = default)
+    private async Task<OperationResult<SaveSummary>> SaveCoreAsync(
+        ProjectSaveRequest request,
+        IProgress<ToolOperationProgress> progress,
+        CancellationToken cancellationToken)
     {
+        var snapshot = request.Snapshot;
         var diagnostics = Validate(snapshot).ToList();
         if (snapshot.SharedStrings.Any(entry => entry.HasConflict))
         {
@@ -53,9 +53,15 @@ public sealed class ProjectWriter : IAsyncOperationService<ProjectSaveRequest, S
         }
 
         if (diagnostics.Any(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error) ||
-            (!allowWarnings && diagnostics.Any(diagnostic => diagnostic.Severity == DiagnosticSeverity.Warning)))
+            (!request.AllowWarnings && diagnostics.Any(diagnostic => diagnostic.Severity == DiagnosticSeverity.Warning)))
         {
-            return new SaveResult(0, diagnostics);
+            return new OperationResult<SaveSummary>(OperationStatus.Failed, null, diagnostics);
+        }
+
+        var rootResult = _fileSystem.ValidateProjectRoot(snapshot.ProjectRoot);
+        if (!rootResult.IsSuccess || rootResult.Value is null)
+        {
+            return new OperationResult<SaveSummary>(OperationStatus.Failed, null, rootResult.Diagnostics);
         }
 
         var savedFiles = 0;
@@ -63,19 +69,16 @@ public sealed class ProjectWriter : IAsyncOperationService<ProjectSaveRequest, S
         {
             cancellationToken.ThrowIfCancellationRequested();
             var hasDirtyUnits = document.Units.Any(unit => unit.IsDirty);
-            if (!hasDirtyUnits && !refreshAnnotations)
+            if (!hasDirtyUnits && !request.RefreshAnnotations)
             {
                 continue;
             }
 
-            var currentHash = await Utf8TextFile.ComputeSha256Async(document.File.FullPath, cancellationToken).ConfigureAwait(false);
-            if (!string.Equals(currentHash, document.File.Sha256, StringComparison.Ordinal))
+            var relativeTarget = Path.GetRelativePath(rootResult.Value.FullPath, document.File.FullPath);
+            var targetResult = _fileSystem.ValidateProjectPath(rootResult.Value, relativeTarget);
+            if (!targetResult.IsSuccess || targetResult.Value is null)
             {
-                diagnostics.Add(new Diagnostic(
-                    DiagnosticSeverity.Error,
-                    "EXTERNAL_FILE_CHANGE",
-                    "文件已被外部程序修改，请重新加载后再保存。",
-                    document.RelativePath));
+                diagnostics.AddRange(targetResult.Diagnostics);
                 continue;
             }
 
@@ -83,7 +86,7 @@ public sealed class ProjectWriter : IAsyncOperationService<ProjectSaveRequest, S
             var cleanFile = CloneWithText(document.File, cleanText);
             var reparsed = _tlParser.Parse(cleanFile, document.RelativePath, snapshot.Language);
             var editedText = ApplyTranslations(cleanText, document, reparsed, document.File.NewLine);
-            if (refreshAnnotations)
+            if (request.RefreshAnnotations)
             {
                 var annotatedFile = CloneWithText(document.File, editedText);
                 var annotatedDocument = _tlParser.Parse(annotatedFile, document.RelativePath, snapshot.Language);
@@ -92,11 +95,27 @@ public sealed class ProjectWriter : IAsyncOperationService<ProjectSaveRequest, S
 
             var validationFile = CloneWithText(document.File, editedText);
             _tlParser.Parse(validationFile, document.RelativePath, snapshot.Language);
-            await AtomicWriteAsync(document.File, editedText, cancellationToken).ConfigureAwait(false);
+            var write = await _fileSystem.AtomicWriteAsync(
+                new AtomicWriteRequest(targetResult.Value, document.File.Encode(editedText), document.File.Sha256),
+                progress,
+                cancellationToken).ConfigureAwait(false);
+            if (!write.IsSuccess)
+            {
+                diagnostics.AddRange(write.Diagnostics.Select(diagnostic => diagnostic.Code == "EXTERNAL_MODIFICATION"
+                    ? diagnostic with { Code = "EXTERNAL_FILE_CHANGE" }
+                    : diagnostic));
+                continue;
+            }
             savedFiles++;
         }
 
-        return new SaveResult(savedFiles, diagnostics);
+        var status = diagnostics.Any(x => x.Severity == DiagnosticSeverity.Error)
+            ? OperationStatus.Failed
+            : diagnostics.Any(x => x.Severity == DiagnosticSeverity.Warning)
+                ? OperationStatus.SucceededWithWarnings
+                : OperationStatus.Succeeded;
+        progress.Report(ToolOperationProgress.Create(ToolOperationStage.Completed, $"已保存 {savedFiles} 个文件", savedFiles, savedFiles));
+        return new OperationResult<SaveSummary>(status, new SaveSummary(savedFiles), diagnostics);
     }
 
     public IReadOnlyList<Diagnostic> Validate(ProjectSnapshot snapshot)
@@ -281,45 +300,6 @@ public sealed class ProjectWriter : IAsyncOperationService<ProjectSaveRequest, S
         }
 
         return builder.ToString();
-    }
-
-    private static async Task AtomicWriteAsync(Utf8TextFile original, string text, CancellationToken cancellationToken)
-    {
-        var bytes = original.Encode(text);
-        var directory = Path.GetDirectoryName(original.FullPath)!;
-        var temporaryPath = Path.Combine(directory, $".{Path.GetFileName(original.FullPath)}.{Guid.NewGuid():N}.rls.tmp");
-        var backupPath = original.FullPath + ".rls.bak";
-        try
-        {
-            await using (var stream = new FileStream(temporaryPath, FileMode.CreateNew, FileAccess.Write, FileShare.None, 64 * 1024, FileOptions.Asynchronous | FileOptions.WriteThrough))
-            {
-                await stream.WriteAsync(bytes, cancellationToken).ConfigureAwait(false);
-                await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
-                stream.Flush(true);
-            }
-
-            if (File.Exists(backupPath))
-            {
-                File.Delete(backupPath);
-            }
-
-            if (OperatingSystem.IsWindows())
-            {
-                File.Replace(temporaryPath, original.FullPath, backupPath, true);
-            }
-            else
-            {
-                File.Copy(original.FullPath, backupPath, true);
-                File.Move(temporaryPath, original.FullPath, true);
-            }
-        }
-        finally
-        {
-            if (File.Exists(temporaryPath))
-            {
-                File.Delete(temporaryPath);
-            }
-        }
     }
 
     private static Utf8TextFile CloneWithText(Utf8TextFile original, string text) => new()

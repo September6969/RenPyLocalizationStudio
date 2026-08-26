@@ -12,7 +12,8 @@ namespace RenPyLocalizationStudio.App.ViewModels;
 public sealed class ProjectSessionViewModel : ObservableObject
 {
     private readonly IProjectAnalysisService _analysisService;
-    private readonly ProjectWriter _writer;
+    private readonly IProjectCatalogService _catalogService;
+    private readonly IProjectSaveService _writer;
     private readonly IFileDialogService _fileDialog;
     private readonly IConfirmationService _confirmation;
     private readonly AppSettingsStore _settings;
@@ -24,7 +25,8 @@ public sealed class ProjectSessionViewModel : ObservableObject
 
     public ProjectSessionViewModel(
         IProjectAnalysisService analysisService,
-        ProjectWriter writer,
+        IProjectCatalogService catalogService,
+        IProjectSaveService writer,
         IFileDialogService fileDialog,
         IConfirmationService confirmation,
         AppSettingsStore settings,
@@ -32,13 +34,14 @@ public sealed class ProjectSessionViewModel : ObservableObject
         TaskCenterViewModel tasks)
     {
         _analysisService = analysisService;
+        _catalogService = catalogService;
         _writer = writer;
         _fileDialog = fileDialog;
         _confirmation = confirmation;
         _settings = settings;
         _theme = theme;
         Tasks = tasks;
-        ChooseProjectCommand = new RelayCommand(ChooseProject);
+        ChooseProjectCommand = new AsyncRelayCommand(ChooseProjectAsync);
         AnalyzeCommand = new AsyncRelayCommand(AnalyzeAsync, () => CanAnalyze);
         SaveCommand = new AsyncRelayCommand(() => SaveAsync(false), () => Snapshot is not null && !Tasks.IsBusy);
         SaveWithAnnotationsCommand = new AsyncRelayCommand(() => SaveAsync(true), () => Snapshot is not null && !Tasks.IsBusy);
@@ -108,25 +111,28 @@ public sealed class ProjectSessionViewModel : ObservableObject
         if (!string.IsNullOrWhiteSpace(saved.LastProject) && Directory.Exists(saved.LastProject))
         {
             ProjectPath = saved.LastProject!;
-            LoadLanguages(saved.LastLanguage);
+            await LoadLanguagesAsync(saved.LastLanguage);
         }
     }
 
-    public void LoadLanguages(string? preferredLanguage = null)
+    public async Task LoadLanguagesAsync(string? preferredLanguage = null, CancellationToken cancellationToken = default)
     {
         Languages.Clear();
-        try
+        var result = await _catalogService.ExecuteAsync(
+            new ProjectLanguageDiscoveryRequest(ProjectPath),
+            Tasks.CreateProgress(),
+            cancellationToken);
+        if (!result.IsSuccess || result.Value is null)
         {
-            foreach (var language in ProjectAnalyzer.FindLanguages(ProjectPath)) Languages.Add(language);
-            Language = preferredLanguage is not null && Languages.Contains(preferredLanguage)
-                ? preferredLanguage
-                : Languages.FirstOrDefault() ?? preferredLanguage ?? string.Empty;
-            Tasks.StatusMessage = Languages.Count == 0 ? "未找到 game/tl/<language>。" : $"发现 {Languages.Count} 个翻译语言。";
+            Tasks.StatusMessage = result.Diagnostics.FirstOrDefault()?.Message ?? "语言发现失败。";
+            return;
         }
-        catch (Exception exception)
-        {
-            Tasks.StatusMessage = exception.Message;
-        }
+
+        foreach (var language in result.Value) Languages.Add(language);
+        Language = preferredLanguage is not null && Languages.Contains(preferredLanguage)
+            ? preferredLanguage
+            : Languages.FirstOrDefault() ?? preferredLanguage ?? string.Empty;
+        Tasks.StatusMessage = Languages.Count == 0 ? "未找到 game/tl/<language>。" : $"发现 {Languages.Count} 个翻译语言。";
     }
 
     public async Task AnalyzeAsync()
@@ -149,26 +155,29 @@ public sealed class ProjectSessionViewModel : ObservableObject
 
         await Tasks.RunAsync("正在安全保存……", async token =>
         {
-            var result = await _writer.SaveAsync(Snapshot, refreshAnnotations, true);
+            var result = await _writer.ExecuteAsync(
+                new ProjectSaveRequest(Snapshot, refreshAnnotations, true),
+                Tasks.CreateProgress(),
+                token);
             var errors = result.Diagnostics.Where(x => x.Severity == DiagnosticSeverity.Error).ToArray();
             if (errors.Length > 0)
             {
                 _confirmation.ShowDiagnostics("保存失败", errors);
                 return;
             }
-            Tasks.StatusMessage = $"已安全保存 {result.SavedFiles} 个文件；正在重新加载。";
+            Tasks.StatusMessage = $"已安全保存 {result.Value?.SavedFiles ?? 0} 个文件；正在重新加载。";
             await AnalyzeCoreAsync(token);
         });
     }
 
     public Task PersistSettingsAsync() => _settings.SaveAsync(new AppSettings(ProjectPath, Language, _theme.AccentColor, _sdkPath));
 
-    private void ChooseProject()
+    private async Task ChooseProjectAsync()
     {
         var selected = _fileDialog.SelectProjectFolder(ProjectPath);
         if (selected is null) return;
         ProjectPath = selected;
-        LoadLanguages();
+        await LoadLanguagesAsync();
     }
 
     private async Task AnalyzeCoreAsync(CancellationToken token)

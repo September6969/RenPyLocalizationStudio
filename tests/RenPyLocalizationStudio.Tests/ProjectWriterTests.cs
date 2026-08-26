@@ -44,13 +44,11 @@ translate schinese python:
     public async Task Save_继承Bom换行保留注释并保持受管注释幂等(bool bom, string newLine)
     {
         await using var project = await TestFiles.CreateProjectAsync(Source, Tl, bom, newLine);
-        var analyzer = new ProjectAnalyzer();
-        var writer = new ProjectWriter();
-        var snapshot = await analyzer.AnalyzeAsync(project.Root, "schinese");
+        var snapshot = await TestFiles.AnalyzeAsync(project.Root);
         snapshot.SharedStrings.Single().Translation = "选择";
 
-        var first = await writer.SaveAsync(snapshot, true, true);
-        Assert.Equal(1, first.SavedFiles);
+        var first = await TestFiles.SaveAsync(snapshot, true, true);
+        Assert.Equal(1, first.Value?.SavedFiles);
         var firstBytes = await File.ReadAllBytesAsync(project.TlPath);
         Assert.Equal(bom, firstBytes.AsSpan().StartsWith(Encoding.UTF8.Preamble));
         var firstText = await File.ReadAllTextAsync(project.TlPath, new UTF8Encoding(bom));
@@ -60,9 +58,9 @@ translate schinese python:
         Assert.Contains("new \"选择\"", firstText);
         Assert.Equal(firstText.Contains("\r\n", StringComparison.Ordinal), newLine == "\r\n");
 
-        var refreshed = await analyzer.AnalyzeAsync(project.Root, "schinese");
-        var second = await writer.SaveAsync(refreshed, true, true);
-        Assert.Equal(1, second.SavedFiles);
+        var refreshed = await TestFiles.AnalyzeAsync(project.Root);
+        var second = await TestFiles.SaveAsync(refreshed, true, true);
+        Assert.Equal(1, second.Value?.SavedFiles);
         var secondText = await File.ReadAllTextAsync(project.TlPath, new UTF8Encoding(bom));
         Assert.Equal(firstText, secondText);
         Assert.True(File.Exists(project.TlPath + ".rls.bak"));
@@ -72,13 +70,13 @@ translate schinese python:
     public async Task Save_外部修改时拒绝覆盖()
     {
         await using var project = await TestFiles.CreateProjectAsync(Source, Tl);
-        var snapshot = await new ProjectAnalyzer().AnalyzeAsync(project.Root, "schinese");
+        var snapshot = await TestFiles.AnalyzeAsync(project.Root);
         snapshot.SharedStrings.Single().Translation = "选择";
         await File.AppendAllTextAsync(project.TlPath, "\n# 外部修改\n", new UTF8Encoding(false));
 
-        var result = await new ProjectWriter().SaveAsync(snapshot, false, true);
+        var result = await TestFiles.SaveAsync(snapshot, false, true);
 
-        Assert.Equal(0, result.SavedFiles);
+        Assert.Equal(0, result.Value?.SavedFiles ?? 0);
         Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == "EXTERNAL_FILE_CHANGE");
     }
 
@@ -99,16 +97,16 @@ translate schinese start_complex:
         "乙"
 """;
         await using var project = await TestFiles.CreateProjectAsync(source, tl);
-        var snapshot = await new ProjectAnalyzer().AnalyzeAsync(project.Root, "schinese");
+        var snapshot = await TestFiles.AnalyzeAsync(project.Root);
         var unit = Assert.Single(snapshot.TranslationUnits);
         Assert.True(unit.IsRawMode);
         unit.RawBodyText = unit.RawBodyText.Replace("甲", "左", StringComparison.Ordinal).Replace("乙", "右", StringComparison.Ordinal);
         unit.IsDirty = true;
 
-        var result = await new ProjectWriter().SaveAsync(snapshot, false, true);
+        var result = await TestFiles.SaveAsync(snapshot, false, true);
         var saved = await File.ReadAllTextAsync(project.TlPath);
 
-        Assert.Equal(1, result.SavedFiles);
+        Assert.Equal(1, result.Value?.SavedFiles);
         Assert.Contains("translate schinese start_complex:", saved);
         Assert.Contains("\"左\"", saved);
         Assert.Contains("\"右\"", saved);

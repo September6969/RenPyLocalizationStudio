@@ -24,7 +24,14 @@ public partial class App : Application
         var messenger = WeakReferenceMessenger.Default;
 
         var session = new ProjectSessionViewModel(
-            new ProjectAnalysisService(new ProjectAnalyzer()), new ProjectWriter(), dialogs, confirmation, settings, theme, tasks);
+            new ProjectAnalysisService(fileSystem),
+            new ProjectCatalogService(fileSystem),
+            new ProjectWriter(fileSystem),
+            dialogs,
+            confirmation,
+            settings,
+            theme,
+            tasks);
         var patchService = new ManagedPatchService(fileSystem);
         var translation = new TranslationWorkspaceViewModel(session);
         var tl = new TlWorkspaceViewModel(session, new RenPySdkService(fileSystem, processRunner), confirmation, dialogs);

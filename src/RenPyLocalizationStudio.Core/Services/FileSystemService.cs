@@ -32,6 +32,10 @@ public interface IFileSystemService
         string relativeDirectory,
         string searchPattern,
         CancellationToken cancellationToken);
+    Task<OperationResult<IReadOnlyList<string>>> EnumerateDirectoriesAsync(
+        ProjectRoot root,
+        string relativeDirectory,
+        CancellationToken cancellationToken);
 }
 
 public sealed class FileSystemService : IFileSystemService
@@ -278,6 +282,45 @@ public sealed class FileSystemService : IFileSystemService
         catch (OperationCanceledException) { return OperationResult<IReadOnlyList<ValidatedProjectPath>>.Cancelled(CancelledDiagnostic(relativeDirectory)); }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         { return OperationResult<IReadOnlyList<ValidatedProjectPath>>.Failure(FileDiagnostic("ENUMERATE_FAILED", ex.Message, relativeDirectory)); }
+    }, CancellationToken.None);
+
+    public Task<OperationResult<IReadOnlyList<string>>> EnumerateDirectoriesAsync(
+        ProjectRoot root, string relativeDirectory, CancellationToken cancellationToken) => Task.Run(() =>
+    {
+        var directory = ValidateProjectPath(root, relativeDirectory);
+        if (!directory.IsSuccess || directory.Value is null)
+        {
+            return new OperationResult<IReadOnlyList<string>>(OperationStatus.Failed, null, directory.Diagnostics);
+        }
+
+        try
+        {
+            if (!Directory.Exists(directory.Value.FullPath))
+            {
+                return OperationResult<IReadOnlyList<string>>.Success([]);
+            }
+
+            var items = new List<string>();
+            foreach (var child in Directory.EnumerateDirectories(directory.Value.FullPath, "*", SearchOption.TopDirectoryOnly))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var validated = ValidateProjectPath(root, Path.GetRelativePath(root.FullPath, child));
+                if (validated.IsSuccess && validated.Value is not null)
+                {
+                    items.Add(Path.GetFileName(validated.Value.FullPath));
+                }
+            }
+
+            return OperationResult<IReadOnlyList<string>>.Success(items.Order(StringComparer.OrdinalIgnoreCase).ToArray());
+        }
+        catch (OperationCanceledException)
+        {
+            return OperationResult<IReadOnlyList<string>>.Cancelled(CancelledDiagnostic(relativeDirectory));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return OperationResult<IReadOnlyList<string>>.Failure(FileDiagnostic("ENUMERATE_DIRECTORIES_FAILED", ex.Message, relativeDirectory));
+        }
     }, CancellationToken.None);
 
     private static bool HasEscapingReparsePoint(string root, string target)

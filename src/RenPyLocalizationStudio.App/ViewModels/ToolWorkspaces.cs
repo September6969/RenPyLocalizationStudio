@@ -180,7 +180,7 @@ public sealed class TlWorkspaceViewModel : WorkspaceViewModelBase
             _session.Tasks.StatusMessage = countOnly ? "TL 缺失数量预检完成。" : "TL 已生成，正在重新分析项目。";
             if (!countOnly)
             {
-                _session.LoadLanguages(language);
+                await _session.LoadLanguagesAsync(language, token);
                 await _session.ReloadAsync(token);
             }
         });
