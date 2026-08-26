@@ -8,15 +8,19 @@ $OutputEncoding = [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($f
 chcp 65001 > $null
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $output = [System.IO.Path]::GetFullPath($OutputDirectory)
+$projectPath = Join-Path $repoRoot 'src\RenPyLocalizationStudio.App\RenPyLocalizationStudio.App.csproj'
+[xml]$project = Get-Content -LiteralPath $projectPath -Raw -Encoding UTF8
+$version = [string]($project.Project.PropertyGroup.Version | Select-Object -First 1)
+if ([string]::IsNullOrWhiteSpace($version)) { throw '无法从应用项目读取版本号。' }
 
-dotnet publish (Join-Path $repoRoot 'src\RenPyLocalizationStudio.App\RenPyLocalizationStudio.App.csproj') -c Release -r win-x64 --self-contained false -o $output
+dotnet publish $projectPath -c Release -r win-x64 --self-contained false -o $output
 if ($LASTEXITCODE -ne 0) { throw "dotnet publish 失败，退出码：$LASTEXITCODE" }
 & (Join-Path $PSScriptRoot 'prepare-tool-runtime.ps1') -OutputDirectory (Join-Path $output 'tools')
 Get-ChildItem -LiteralPath $output -Filter '*.pdb' -File -Recurse | Remove-Item -Force
 
 if ($Package) {
     $releaseDirectory = Join-Path $repoRoot 'artifacts\release'
-    $archive = Join-Path $releaseDirectory 'RenPyLocalizationStudio-v0.3.1-win-x64-framework-dependent.zip'
+    $archive = Join-Path $releaseDirectory "RenPyLocalizationStudio-v$version-win-x64-framework-dependent.zip"
     New-Item -ItemType Directory -Path $releaseDirectory -Force | Out-Null
     if (Test-Path -LiteralPath $archive) { Remove-Item -LiteralPath $archive -Force }
     Compress-Archive -Path (Join-Path $output '*') -DestinationPath $archive -CompressionLevel Optimal
