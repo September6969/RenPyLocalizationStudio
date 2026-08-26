@@ -26,6 +26,7 @@
                                     <DataTrigger Binding="{Binding}" Value="{x:Static vm:TranslationViewMode.Flow}"><Setter Property="Text" Value="剧情流" /></DataTrigger>
                                     <DataTrigger Binding="{Binding}" Value="{x:Static vm:TranslationViewMode.Strings}"><Setter Property="Text" Value="字符串表" /></DataTrigger>
                                     <DataTrigger Binding="{Binding}" Value="{x:Static vm:TranslationViewMode.Unbound}"><Setter Property="Text" Value="未绑定" /></DataTrigger>
+                                    <DataTrigger Binding="{Binding}" Value="{x:Static vm:TranslationViewMode.Bookmarks}"><Setter Property="Text" Value="书签" /></DataTrigger>
                                 </Style.Triggers>
                             </Style>
                         </TextBlock.Style>

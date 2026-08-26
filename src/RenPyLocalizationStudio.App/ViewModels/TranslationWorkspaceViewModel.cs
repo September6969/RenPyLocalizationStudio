@@ -10,7 +10,7 @@ using RenPyLocalizationStudio.Core.Services;
 
 namespace RenPyLocalizationStudio.App.ViewModels;
 
-public enum TranslationViewMode { Flow, Strings, Unbound }
+public enum TranslationViewMode { Flow, Strings, Unbound, Bookmarks }
 public enum InspectorMode { Empty, Flow, TranslationEditor }
 
 public sealed class ImagePreviewViewModel : ObservableObject
@@ -260,6 +260,7 @@ public sealed class TranslationWorkspaceViewModel : WorkspaceViewModelBase, IDis
     private IReadOnlyList<ContentItem> _coverageItems = [];
     private readonly Dictionary<ContentItem, bool> _completionStates = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<SharedStringEntry, List<ContentItem>> _sharedPresentationItems = new(ReferenceEqualityComparer.Instance);
+    private readonly HashSet<string> _bookmarkedNodeIds = new(StringComparer.Ordinal);
     private CancellationTokenSource? _previewCancellation;
     private long _previewVersion;
 
@@ -277,6 +278,7 @@ public sealed class TranslationWorkspaceViewModel : WorkspaceViewModelBase, IDis
         NavigateLabelCommand = new RelayCommand(NavigateSelectedLabel, () => SelectedLabel is not null);
         MovePreviousCommand = new RelayCommand(() => MoveEditable(-1));
         MoveNextCommand = new RelayCommand(() => MoveEditable(1));
+        ToggleBookmarkCommand = new RelayCommand<ContentItem>(ToggleBookmark, item => item?.Node is not null);
         ClearSearchCommand = new RelayCommand(() => SearchText = string.Empty, () => SearchText.Length > 0);
         Inspector.TranslationChanged += OnTranslationChanged;
         session.SnapshotChanged += OnSnapshotChanged;
@@ -297,12 +299,19 @@ public sealed class TranslationWorkspaceViewModel : WorkspaceViewModelBase, IDis
     public IRelayCommand NavigateLabelCommand { get; }
     public IRelayCommand MovePreviousCommand { get; }
     public IRelayCommand MoveNextCommand { get; }
+    public IRelayCommand<ContentItem> ToggleBookmarkCommand { get; }
     public IRelayCommand ClearSearchCommand { get; }
 
     public TranslationViewMode ViewMode
     {
         get => _viewMode;
-        set { if (SetProperty(ref _viewMode, value)) RebuildProjection(); }
+        set
+        {
+            if (!SetProperty(ref _viewMode, value)) return;
+            RebuildProjection();
+            RebuildNavigation();
+            OnPropertyChanged(nameof(NavigationHeading));
+        }
     }
 
     public FlowGroupingMode GroupingMode
@@ -353,8 +362,17 @@ public sealed class TranslationWorkspaceViewModel : WorkspaceViewModelBase, IDis
     public object? AnchorItem { get => _anchorItem; private set => SetProperty(ref _anchorItem, value); }
     public ScrollAnchor? ScrollAnchor { get => _scrollAnchor; private set => SetProperty(ref _scrollAnchor, value); }
     public string ItemCount => $"{VisibleItems.Count:N0} 项";
-    public string NavigationHeading => GroupingMode switch { FlowGroupingMode.SourceFile => "文件", FlowGroupingMode.Label => "LABEL", _ => "剧情入口" };
-    public string ViewTitle => ViewMode switch { TranslationViewMode.Strings => "字符串表", TranslationViewMode.Unbound => "未绑定", _ => "剧情流" };
+    public string NavigationHeading => ViewMode == TranslationViewMode.Bookmarks
+        ? "书签"
+        : GroupingMode switch { FlowGroupingMode.SourceFile => "文件", FlowGroupingMode.Label => "LABEL", _ => "剧情入口" };
+    public string ViewTitle => ViewMode switch
+    {
+        TranslationViewMode.Strings => "字符串表",
+        TranslationViewMode.Unbound => "未绑定",
+        TranslationViewMode.Bookmarks => "书签",
+        _ => "剧情流"
+    };
+    public int BookmarkedCount => _bookmarkedNodeIds.Count;
     public int EditableCount { get; private set; }
     public int TranslatedCount { get; private set; }
     public double CoveragePercent { get; private set; }
@@ -438,8 +456,12 @@ public sealed class TranslationWorkspaceViewModel : WorkspaceViewModelBase, IDis
         {
             TranslationViewMode.Strings => snapshot.SharedStrings.Select(ContentItem.FromSharedString),
             TranslationViewMode.Unbound => snapshot.TranslationUnits.Where(x => x.IsUnboundFlowTranslation).Select(ContentItem.FromTranslation),
+            TranslationViewMode.Bookmarks => BuildFlowItems(snapshot, FlowGroupingMode.StoryPath)
+                .Where(item => item.Node is not null && _bookmarkedNodeIds.Contains(item.Key)),
             _ => BuildFlowItems(snapshot, GroupingMode)
         }).ToList();
+        foreach (var item in projectedItems)
+            item.SetBookmarked(item.Node is not null && _bookmarkedNodeIds.Contains(item.Key));
         _coverageItems = projectedItems;
         RebuildSharedPresentationIndex();
         RecalculateCoverage();
@@ -512,7 +534,9 @@ public sealed class TranslationWorkspaceViewModel : WorkspaceViewModelBase, IDis
     private void NavigateSelectedLabel()
     {
         if (SelectedLabel is null) return;
-        ViewMode = TranslationViewMode.Flow;
+        // 书签导航保持在书签投影中，避免点击左侧条目后意外跳回完整剧情流。
+        if (ViewMode != TranslationViewMode.Bookmarks)
+            ViewMode = TranslationViewMode.Flow;
         if (SearchText.Length > 0) SearchText = string.Empty;
         var projectedItem = VisibleItems.FirstOrDefault(item => item.Key == SelectedLabel.NodeId);
         if (projectedItem is not null)
@@ -531,7 +555,26 @@ public sealed class TranslationWorkspaceViewModel : WorkspaceViewModelBase, IDis
         Labels.Clear();
         SelectedLabel = null;
         if (_session.Snapshot is null) return;
-        foreach (var item in TranslationNavigationBuilder.Build(_session.Snapshot, GroupingMode)) Labels.Add(item);
+        var items = ViewMode == TranslationViewMode.Bookmarks
+            ? TranslationNavigationBuilder.BuildBookmarks(_session.Snapshot, _bookmarkedNodeIds)
+            : TranslationNavigationBuilder.Build(_session.Snapshot, GroupingMode);
+        foreach (var item in items) Labels.Add(item);
+    }
+
+    private void ToggleBookmark(ContentItem? item)
+    {
+        if (item?.Node is null) return;
+        var nodeId = item.Node.Id;
+        var bookmarked = !_bookmarkedNodeIds.Add(nodeId);
+        if (bookmarked) _bookmarkedNodeIds.Remove(nodeId);
+        item.SetBookmarked(bookmarked);
+        OnPropertyChanged(nameof(BookmarkedCount));
+        if (ViewMode == TranslationViewMode.Bookmarks)
+        {
+            RebuildNavigation();
+            RebuildProjection(item.Key);
+        }
+        _session.Tasks.StatusMessage = bookmarked ? "已移除书签。" : "已添加书签。";
     }
 
     private void MoveEditable(int direction)

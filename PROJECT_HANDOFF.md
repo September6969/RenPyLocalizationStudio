@@ -14,7 +14,7 @@ RenPy Localization Studio 是一个面向 Windows 的 Ren’Py 人工汉化工�
 - 测试项目：`tests/RenPyLocalizationStudio.Tests`
 - 默认发布目录：`artifacts\win-x64`
 - 主程序：`artifacts\win-x64\RenPyLocalizationStudio.exe`
-- 当前版本：`0.3.3`
+- 当前版本：`0.3.4`
 - 发布方式：框架依赖，不是单文件或自包含包；目标机器需要 .NET 10 Desktop Runtime
 
 项目不接入机翻或模型 API，不执行游戏 EXE，不自动启动游戏，不修改原始源码来包裹 `_()`，不删除 `.rpa`、`.rpyc` 或 `.rpymc`。
@@ -24,7 +24,7 @@ RenPy Localization Studio 是一个面向 Windows 的 Ren’Py 人工汉化工�
 截至 2026-08-27：
 
 - Release 构建通过，0 警告、0 错误。
-- 自动化测试共 62 项，全部通过。
+- 自动化测试共 67 项，全部通过。
 - 使用本机 `E:\renpy-8.5.2-sdk\renpy.exe` 对临时项目副本执行 lint，已通过。
 - 框架依赖发布由 `scripts/publish.ps1` 生成到被忽略的 `artifacts\win-x64`；本地清理后按需重新生成，正式包以 GitHub Release 为准。
 - 发布版已经完成启动烟测。
@@ -48,6 +48,7 @@ RenPy Localization Studio 是一个面向 Windows 的 Ren’Py 人工汉化工�
 - `Alt+↑` / `Alt+↓` 在可编辑译文之间切换并保持编辑焦点。
 - 正常“已绑定”状态不重复显示文字；仅异常、共享影响或待处理状态突出显示。
 - 同一目标语言下相同 `old` 使用共享译文语义。
+- 剧情流代码行可通过右键菜单添加/移除书签；“书签”视图按稳定节点 ID显示并支持左侧定位，书签仅在当前会话保留。
 
 ### 3.2 TL 生成
 

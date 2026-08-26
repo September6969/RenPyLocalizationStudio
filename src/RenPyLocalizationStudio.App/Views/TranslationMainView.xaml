@@ -46,7 +46,8 @@
             <!-- Upper: Flow List -->
             <ListView x:Name="FlowList" Grid.Row="0" ItemsSource="{Binding Workspace.VisibleItems}" SelectedItem="{Binding Workspace.SelectedItem}"
                       behaviors:ScrollAnchorBehavior.AnchorItem="{Binding Workspace.AnchorItem}"
-                      PreviewMouseLeftButtonUp="FlowList_PreviewMouseLeftButtonUp" PreviewKeyDown="FlowList_PreviewKeyDown"
+                      PreviewMouseLeftButtonUp="FlowList_PreviewMouseLeftButtonUp" PreviewMouseRightButtonDown="FlowList_PreviewMouseRightButtonDown"
+                      PreviewKeyDown="FlowList_PreviewKeyDown"
                       Background="Transparent" BorderThickness="0" ItemContainerStyle="{StaticResource ContentRowStyle}"
                       ScrollViewer.CanContentScroll="True"
                       ScrollViewer.HorizontalScrollBarVisibility="Disabled" VirtualizingPanel.IsVirtualizing="True"
@@ -54,9 +55,42 @@
                 <ListView.ItemsPanel><ItemsPanelTemplate><VirtualizingStackPanel /></ItemsPanelTemplate></ListView.ItemsPanel>
                 <ListView.ItemTemplate>
                     <DataTemplate>
-                        <Border x:Name="RowSurface" Background="Transparent" CornerRadius="6" Padding="12,8">
+                        <Border x:Name="RowSurface" Background="Transparent" CornerRadius="6" Padding="12,8"
+                                Tag="{Binding DataContext.Workspace.ToggleBookmarkCommand, RelativeSource={RelativeSource AncestorType={x:Type ListView}}}">
+                            <Border.ContextMenu>
+                                <ContextMenu DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
+                                    <MenuItem Header="添加书签"
+                                              Command="{Binding PlacementTarget.Tag, RelativeSource={RelativeSource AncestorType={x:Type ContextMenu}}}"
+                                              CommandParameter="{Binding}">
+                                        <MenuItem.Style>
+                                            <Style TargetType="MenuItem">
+                                                <Setter Property="Visibility" Value="Visible" />
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding IsBookmarked}" Value="True">
+                                                        <Setter Property="Visibility" Value="Collapsed" />
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </MenuItem.Style>
+                                    </MenuItem>
+                                    <MenuItem Header="移除书签"
+                                              Command="{Binding PlacementTarget.Tag, RelativeSource={RelativeSource AncestorType={x:Type ContextMenu}}}"
+                                              CommandParameter="{Binding}">
+                                        <MenuItem.Style>
+                                            <Style TargetType="MenuItem">
+                                                <Setter Property="Visibility" Value="Collapsed" />
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding IsBookmarked}" Value="True">
+                                                        <Setter Property="Visibility" Value="Visible" />
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </MenuItem.Style>
+                                    </MenuItem>
+                                </ContextMenu>
+                            </Border.ContextMenu>
                             <Grid>
-                                <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                                 <Border x:Name="AccentLine" Width="3" CornerRadius="1.5" Margin="0,2,12,2" Background="{Binding Accent}" Opacity="0.4" />
                                 <StackPanel Grid.Column="1" Margin="{Binding IndentMargin}" VerticalAlignment="Center">
                                     <TextBlock x:Name="DialogueLine" TextWrapping="Wrap" Visibility="Collapsed" FontSize="13">
@@ -69,8 +103,12 @@
                                                Foreground="{DynamicResource PathTextBrush}" TextTrimming="CharacterEllipsis" />
                                 </StackPanel>
                                 
+                                <TextBlock Grid.Column="2" Text="●" FontSize="10" Margin="10,0,2,0" VerticalAlignment="Center"
+                                           Foreground="{DynamicResource BrandAccentBrush}" ToolTip="已添加书签"
+                                           Visibility="{Binding IsBookmarked, Converter={StaticResource BooleanToVisibilityConverter}}" />
+
                                 <!-- Badges -->
-                                <Border x:Name="StatusBadge" Grid.Column="2" Margin="16,0,4,0" Padding="8,3" CornerRadius="4"
+                                <Border x:Name="StatusBadge" Grid.Column="3" Margin="16,0,4,0" Padding="8,3" CornerRadius="4"
                                         VerticalAlignment="Center" Background="{DynamicResource BackgroundLevel1}"
                                         Visibility="{Binding IsStatusVisible, Converter={StaticResource BooleanToVisibilityConverter}}">
                                     <TextBlock Text="{Binding Badge}" FontSize="11" FontWeight="Medium">

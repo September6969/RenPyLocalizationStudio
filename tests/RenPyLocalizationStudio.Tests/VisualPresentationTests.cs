@@ -89,6 +89,34 @@ public sealed class VisualPresentationTests
     }
 
     [Fact]
+    public void TranslationNavigation_书签只显示稳定节点并保持源码顺序()
+    {
+        var snapshot = new ProjectSnapshot { ProjectRoot = "X", GameDirectory = "X/game", Language = "schinese" };
+        var first = new FlowNode { Id = "first", Kind = FlowNodeKind.Dialogue, DisplayText = "first", OriginalText = "first", Region = new SourceRegion("game/a.rpy", 2, 2), Indent = 0 };
+        var second = new FlowNode { Id = "second", Kind = FlowNodeKind.Jump, DisplayText = "jump second", Target = "second", Region = new SourceRegion("game/a.rpy", 3, 3), Indent = 0 };
+        var ignored = new FlowNode { Id = "ignored", Kind = FlowNodeKind.Dialogue, DisplayText = "ignored", Region = new SourceRegion("game/a.rpy", 4, 4), Indent = 0 };
+        snapshot.Graph.Nodes.AddRange([first, second, ignored]);
+
+        var bookmarks = TranslationNavigationBuilder.BuildBookmarks(snapshot, ["second", "first", "missing"]);
+
+        Assert.Equal(["first", "jump second"], bookmarks.Select(item => item.Name));
+        Assert.Equal(["first", "second"], bookmarks.Select(item => item.NodeId));
+        Assert.Contains("书签 · game/a.rpy:3", bookmarks[1].Location);
+    }
+
+    [Fact]
+    public void ContentItem_书签状态可独立切换()
+    {
+        var item = ContentItem.FromFlow(DialogueNode("uv", "正文"), null, null, 0);
+
+        item.SetBookmarked(true);
+        Assert.True(item.IsBookmarked);
+
+        item.SetBookmarked(false);
+        Assert.False(item.IsBookmarked);
+    }
+
+    [Fact]
     public void ContentItem_分离说话人与正文并隐藏正常绑定状态()
     {
         var node = DialogueNode("uv", "正文: 保留冒号");

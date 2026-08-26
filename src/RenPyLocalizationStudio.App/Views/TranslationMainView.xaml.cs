@@ -1,3 +1,4 @@
+using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using RenPyLocalizationStudio.App.ViewModels;
@@ -13,6 +14,16 @@ public partial class TranslationMainView : UserControl
     {
         if (DataContext is TranslationMainContentViewModel { Workspace.SelectedItem.Node.Kind: FlowNodeKind.Jump or FlowNodeKind.Call } viewModel)
             viewModel.Workspace.OpenSelectedCommand.Execute(null);
+    }
+
+    private void FlowList_PreviewMouseRightButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        if (DataContext is not TranslationMainContentViewModel viewModel) return;
+        if (ItemsControl.ContainerFromElement(FlowList, e.OriginalSource as DependencyObject) is not ListViewItem container ||
+            container.DataContext is not ContentItem item) return;
+
+        FlowList.SelectedItem = item;
+        viewModel.Workspace.SelectedItem = item;
     }
 
     private void FlowList_PreviewKeyDown(object sender, KeyEventArgs e)

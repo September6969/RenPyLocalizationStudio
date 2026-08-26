@@ -11,6 +11,18 @@ public sealed record NavigationItem(string Name, string Location, string NodeId)
 
 public static class TranslationNavigationBuilder
 {
+    public static IReadOnlyList<NavigationItem> BuildBookmarks(ProjectSnapshot snapshot, IEnumerable<string> bookmarkIds)
+    {
+        var ids = bookmarkIds.ToHashSet(StringComparer.Ordinal);
+        return snapshot.Graph.Nodes
+            .Where(node => ids.Contains(node.Id))
+            .Select(node => new NavigationItem(
+                node.DisplayText,
+                $"书签 · {node.Region.RelativePath}:{node.Region.StartLine}",
+                node.Id))
+            .ToArray();
+    }
+
     public static IReadOnlyList<NavigationItem> Build(ProjectSnapshot snapshot, FlowGroupingMode mode)
     {
         if (mode == FlowGroupingMode.SourceFile)
@@ -92,6 +104,7 @@ public sealed class ContentItem : ObservableObject
     private string _badge = string.Empty;
     private TranslationStatusKind _statusKind;
     private bool _isStatusVisible;
+    private bool _isBookmarked;
 
     public required string Key { get; init; }
     public required string Title { get; init; }
@@ -103,6 +116,7 @@ public sealed class ContentItem : ObservableObject
     public string Badge { get => _badge; set => SetProperty(ref _badge, value); }
     public TranslationStatusKind StatusKind { get => _statusKind; private set => SetProperty(ref _statusKind, value); }
     public bool IsStatusVisible { get => _isStatusVisible; private set => SetProperty(ref _isStatusVisible, value); }
+    public bool IsBookmarked { get => _isBookmarked; private set => SetProperty(ref _isBookmarked, value); }
     public required Brush Accent { get; init; }
     public required Thickness IndentMargin { get; init; }
     public required string SearchTextBase { get; init; }
@@ -222,6 +236,8 @@ public sealed class ContentItem : ObservableObject
         IsStatusVisible = visible;
         OnPropertyChanged(nameof(IsTranslationComplete));
     }
+
+    internal void SetBookmarked(bool value) => IsBookmarked = value;
 
     private ContentItem WithCurrentStatus()
     {
