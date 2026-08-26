@@ -10,6 +10,7 @@ $repoRoot = Split-Path -Parent $PSScriptRoot
 $output = [System.IO.Path]::GetFullPath($OutputDirectory)
 
 dotnet publish (Join-Path $repoRoot 'src\RenPyLocalizationStudio.App\RenPyLocalizationStudio.App.csproj') -c Release -r win-x64 --self-contained false -o $output
+if ($LASTEXITCODE -ne 0) { throw "dotnet publish 失败，退出码：$LASTEXITCODE" }
 & (Join-Path $PSScriptRoot 'prepare-tool-runtime.ps1') -OutputDirectory (Join-Path $output 'tools')
 Get-ChildItem -LiteralPath $output -Filter '*.pdb' -File -Recurse | Remove-Item -Force
 
