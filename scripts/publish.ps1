@@ -15,7 +15,7 @@ Get-ChildItem -LiteralPath $output -Filter '*.pdb' -File -Recurse | Remove-Item 
 
 if ($Package) {
     $releaseDirectory = Join-Path $repoRoot 'artifacts\release'
-    $archive = Join-Path $releaseDirectory 'RenPyLocalizationStudio-v0.3.0-win-x64-framework-dependent.zip'
+    $archive = Join-Path $releaseDirectory 'RenPyLocalizationStudio-v0.3.1-win-x64-framework-dependent.zip'
     New-Item -ItemType Directory -Path $releaseDirectory -Force | Out-Null
     if (Test-Path -LiteralPath $archive) { Remove-Item -LiteralPath $archive -Force }
     Compress-Archive -Path (Join-Path $output '*') -DestinationPath $archive -CompressionLevel Optimal
