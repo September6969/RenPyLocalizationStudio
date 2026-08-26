@@ -1,5 +1,5 @@
-using SkiaSharp;
 using RenPyLocalizationStudio.Core.Services;
+using SkiaSharp;
 
 namespace RenPyLocalizationStudio.Tests;
 

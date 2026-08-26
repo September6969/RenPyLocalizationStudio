@@ -1,7 +1,7 @@
-using RenPyLocalizationStudio.App.ViewModels;
-using RenPyLocalizationStudio.App.Behaviors;
-using RenPyLocalizationStudio.Core;
 using ICSharpCode.AvalonEdit;
+using RenPyLocalizationStudio.App.Behaviors;
+using RenPyLocalizationStudio.App.ViewModels;
+using RenPyLocalizationStudio.Core;
 
 namespace RenPyLocalizationStudio.Tests;
 
@@ -95,8 +95,12 @@ public sealed class VisualPresentationTests
         var empty = ContentItem.FromFlow(DialogueNode(null, "空"), Unit(node, string.Empty), null, 0);
         var label = ContentItem.FromFlow(new FlowNode
         {
-            Id = "label", Kind = FlowNodeKind.Label, DisplayText = "label start",
-            Region = new SourceRegion("game/script.rpy", 1, 1), LabelName = "start", Indent = 0
+            Id = "label",
+            Kind = FlowNodeKind.Label,
+            DisplayText = "label start",
+            Region = new SourceRegion("game/script.rpy", 1, 1),
+            LabelName = "start",
+            Indent = 0
         }, null, null, 0);
 
         var coverage = TranslationCoverageCalculator.Calculate([completed, empty, label]);
@@ -121,17 +125,26 @@ public sealed class VisualPresentationTests
 
     private static FlowNode DialogueNode(string? speaker, string text) => new()
     {
-        Id = Guid.NewGuid().ToString("N"), Kind = FlowNodeKind.Dialogue,
-        DisplayText = speaker is null ? text : $"{speaker}: {text}", Speaker = speaker, OriginalText = text,
-        Region = new SourceRegion("game/script.rpy", 2, 2), Indent = 4
+        Id = Guid.NewGuid().ToString("N"),
+        Kind = FlowNodeKind.Dialogue,
+        DisplayText = speaker is null ? text : $"{speaker}: {text}",
+        Speaker = speaker,
+        OriginalText = text,
+        Region = new SourceRegion("game/script.rpy", 2, 2),
+        Indent = 4
     };
 
     private static TranslationUnit Unit(FlowNode? node, string translation, bool missingNew = false) => new()
     {
         Kind = missingNew ? TranslationUnitKind.String : TranslationUnitKind.Dialogue,
-        Language = "schinese", FilePath = "E:\\game\\tl\\schinese\\script.rpy", RelativeTlPath = "script.rpy",
-        BlockSpan = new TextSpan(0, 1), HeaderLine = 1, TranslationText = translation,
-        TranslationValueSpan = missingNew ? null : new TextSpan(0, translation.Length), MissingNew = missingNew,
+        Language = "schinese",
+        FilePath = "E:\\game\\tl\\schinese\\script.rpy",
+        RelativeTlPath = "script.rpy",
+        BlockSpan = new TextSpan(0, 1),
+        HeaderLine = 1,
+        TranslationText = translation,
+        TranslationValueSpan = missingNew ? null : new TextSpan(0, translation.Length),
+        MissingNew = missingNew,
         BoundNode = node
     };
 }

@@ -2,6 +2,7 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using RenPyLocalizationStudio.App.ViewModels;
 namespace RenPyLocalizationStudio.App.Views;
+
 public partial class DiagnosticsMainView : UserControl
 {
     public DiagnosticsMainView() => InitializeComponent();

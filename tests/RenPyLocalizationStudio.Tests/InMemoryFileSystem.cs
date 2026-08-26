@@ -47,7 +47,9 @@ internal sealed class InMemoryFileSystem : IFileSystemService
     }
 
     public OperationResult<ValidatedExecutablePath> ValidateExecutable(string path) =>
-        OperationResult<ValidatedExecutablePath>.Failure(Error("EXECUTABLE_NOT_FOUND", path));
+        path.Equals("C:\\tools\\renpy.exe", StringComparison.OrdinalIgnoreCase)
+            ? OperationResult<ValidatedExecutablePath>.Success(new ValidatedExecutablePath(path))
+            : OperationResult<ValidatedExecutablePath>.Failure(Error("EXECUTABLE_NOT_FOUND", path));
 
     public Task<OperationResult<Utf8TextFile>> ReadUtf8Async(ValidatedProjectPath path, CancellationToken cancellationToken)
     {

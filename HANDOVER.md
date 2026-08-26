@@ -1,5 +1,7 @@
 # RenPy Localization Studio - 开发交接记录 (Master Handover Document)
 
+> **v0.3.0 架构更新（2026-08-26）**：项目已建立 Git 基线；分析、语言发现和保存统一通过 `IFileSystemService`，素材预览使用可失效的 `Project Asset Index`，后台工作由 `WorkspaceTaskCoordinator` 管理。测试已扩展到 54 项。发布脚本使用 `tools/tool-runtime.lock.json` 校验 Python 3.13.7、unrpyc 2.0.4 和固定提交的 rpatool，并生成不含 PDB 的框架依赖 ZIP 与 SHA-256。以下旧章节中的测试数量、缓存实现和版本号仅作为历史记录，以本段、`CONTEXT.md`、`README.md` 与代码为准。
+
 > **文档创建时间**：2026-08-26  
 > **文档版本**：v2.0 (全功能与动效重构完整版)  
 > **适用对象**：接手本项目的 AI 模型（如 Gemini / Claude / GPT）或全栈/WPF 开发人员。
@@ -24,7 +26,7 @@
 - **项目结构**：
   - `src/RenPyLocalizationStudio.Core`：Ren'Py 脚本 AST 解析器、TL 解析生成、补丁生成、诊断、SDK 交互。
   - `src/RenPyLocalizationStudio.App`：WPF 桌面应用（主窗口、6 大工作区 ViewModel、XAML 视图、动效与 UI 服务）。
-  - `tests/RenPyLocalizationStudio.Tests`：38 项 xUnit 自动化测试套件。
+  - `tests/RenPyLocalizationStudio.Tests`：54 项 xUnit 自动化测试套件。
 - **正式成品输出路径**：`E:\RenPyFlowTranslator\artifacts\win-x64\RenPyLocalizationStudio.exe`
 - **发布脚本**：`E:\RenPyFlowTranslator\scripts\publish.ps1`
 
@@ -192,7 +194,7 @@ _colorTimer.Start();
 # 1. 强杀已有进程防文件锁死
 Stop-Process -Name "RenPyLocalizationStudio" -Force -ErrorAction SilentlyContinue
 
-# 2. 运行单元测试套件（确保 38/38 全部通过）
+# 2. 运行单元测试套件（确保 54/54 全部通过）
 dotnet test E:\RenPyFlowTranslator\tests\RenPyLocalizationStudio.Tests
 
 # 3. 编译并发布到成品交付目录

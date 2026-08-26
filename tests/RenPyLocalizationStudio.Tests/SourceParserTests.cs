@@ -1,5 +1,5 @@
-using RenPyLocalizationStudio.Core;
 using System.Text;
+using RenPyLocalizationStudio.Core;
 
 namespace RenPyLocalizationStudio.Tests;
 

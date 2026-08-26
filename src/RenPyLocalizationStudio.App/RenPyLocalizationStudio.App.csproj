@@ -10,7 +10,7 @@
 
   <ItemGroup>
     <PackageReference Include="AvalonEdit" Version="6.3.1.120" />
-    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.0" />
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
     <PackageReference Include="SkiaSharp.NativeAssets.Win32" Version="4.151.1" GeneratePathProperty="true" />
   </ItemGroup>
 
@@ -26,7 +26,9 @@
     <PublishSingleFile>false</PublishSingleFile>
     <SelfContained>false</SelfContained>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
-    <Version>0.2.1</Version>
+    <Version>0.3.0</Version>
+    <AssemblyVersion>0.3.0.0</AssemblyVersion>
+    <FileVersion>0.3.0.0</FileVersion>
     <Product>RenPy Localization Studio</Product>
     <Description>面向 Ren’Py 项目的本地化、剧情流编辑与补丁工作台。</Description>
   </PropertyGroup>

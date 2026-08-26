@@ -1,5 +1,7 @@
 # RenPy Localization Studio
 
+当前版本：**v0.3.0**。
+
 RenPy Localization Studio 是一个面向 Ren’Py 人工本地化流程的 Windows 桌面工作台。它把 tl 生成、剧情流翻译、额外文本、替换规则、`zzz.rpy` 补丁以及解包/反编译安全服务收敛到同一项目界面。
 
 ## 主要能力
@@ -57,4 +59,10 @@ dotnet run --project .\src\RenPyLocalizationStudio.App\RenPyLocalizationStudio.A
 .\scripts\publish.ps1
 ```
 
-默认发布目录为 `artifacts\win-x64`。主程序为框架依赖版本；目标电脑若没有 .NET 10 Desktop Runtime，可安装官方运行时，或自行使用 `--self-contained true` 构建自包含包。
+默认发布目录为 `artifacts\win-x64`。主程序为框架依赖版本，目标电脑必须安装 **.NET 10 Desktop Runtime x64**。官方 Release 已包含校验过的隔离 Python、unrpyc 与 rpatool 运行时，不需要另外下载归档工具。
+
+生成可发布 ZIP 与 SHA-256：
+
+```powershell
+.\scripts\publish.ps1 -Package
+```

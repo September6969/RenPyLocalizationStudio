@@ -359,7 +359,7 @@ public sealed class ThemeService : IThemeService
 
         AccentColor = color.ToUpperInvariant();
         var resources = Application.Current.Resources;
-        
+
         Color fromColor = Colors.Transparent;
         if (resources["BrandAccentBrush"] is SolidColorBrush curBrush)
         {
@@ -386,7 +386,7 @@ public sealed class ThemeService : IThemeService
         {
             var elapsed = (DateTime.UtcNow - _animStartTime).TotalMilliseconds;
             var progress = Math.Clamp(elapsed / DurationMs, 0.0, 1.0);
-            
+
             // Cubic ease out
             double ease = 1.0 - Math.Pow(1.0 - progress, 3);
 

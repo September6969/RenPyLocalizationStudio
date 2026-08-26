@@ -3,6 +3,7 @@ using System.Windows.Controls;
 using System.Windows.Threading;
 using RenPyLocalizationStudio.App.Behaviors;
 namespace RenPyLocalizationStudio.App.Views;
+
 public partial class ZzzDocumentView : UserControl
 {
     public ZzzDocumentView() => InitializeComponent();

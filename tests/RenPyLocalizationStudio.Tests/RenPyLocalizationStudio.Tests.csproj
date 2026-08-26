@@ -23,6 +23,12 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\RenPyLocalizationStudio.Core\RenPyLocalizationStudio.Core.csproj" />
     <ProjectReference Include="..\..\src\RenPyLocalizationStudio.App\RenPyLocalizationStudio.App.csproj" />
+    <ProjectReference Include="..\RenPyLocalizationStudio.ProcessTestHelper\RenPyLocalizationStudio.ProcessTestHelper.csproj" ReferenceOutputAssembly="false" />
   </ItemGroup>
+
+  <Target Name="CopyProcessTestHelper" AfterTargets="Build">
+    <Copy SourceFiles="..\RenPyLocalizationStudio.ProcessTestHelper\bin\$(Configuration)\net10.0\RenPyLocalizationStudio.ProcessTestHelper.dll"
+          DestinationFolder="$(OutputPath)" />
+  </Target>
 
 </Project>

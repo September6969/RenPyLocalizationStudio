@@ -1,9 +1,9 @@
 using System.Collections.ObjectModel;
+using System.Windows.Media;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using CommunityToolkit.Mvvm.Messaging;
 using RenPyLocalizationStudio.App.Services;
-using System.Windows.Media;
 
 namespace RenPyLocalizationStudio.App.ViewModels;
 
