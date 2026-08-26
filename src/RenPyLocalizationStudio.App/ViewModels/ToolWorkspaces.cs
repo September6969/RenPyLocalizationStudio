@@ -72,8 +72,8 @@ public sealed class TlWorkspaceViewModel : WorkspaceViewModelBase
         PreflightCommand = new AsyncRelayCommand(() => RunAsync(true));
         GenerateCommand = new AsyncRelayCommand(() => RunAsync(false));
         ClearLogsCommand = new RelayCommand(Main.Logs.Clear, () => Main.Logs.Count > 0);
-        ChooseSdkCommand = new RelayCommand(ChooseSdk);
-        ClearSdkCommand = new RelayCommand(ClearSdk, () => !string.IsNullOrWhiteSpace(_session.SdkPath));
+        ChooseSdkCommand = new AsyncRelayCommand(ChooseSdkAsync);
+        ClearSdkCommand = new AsyncRelayCommand(ClearSdkAsync, () => !string.IsNullOrWhiteSpace(_session.SdkPath));
         Main.Logs.CollectionChanged += (_, _) =>
         {
             OnPropertyChanged(nameof(HasLogs));
@@ -112,8 +112,8 @@ public sealed class TlWorkspaceViewModel : WorkspaceViewModelBase
     public IAsyncRelayCommand PreflightCommand { get; }
     public IAsyncRelayCommand GenerateCommand { get; }
     public IRelayCommand ClearLogsCommand { get; }
-    public IRelayCommand ChooseSdkCommand { get; }
-    public IRelayCommand ClearSdkCommand { get; }
+    public IAsyncRelayCommand ChooseSdkCommand { get; }
+    public IAsyncRelayCommand ClearSdkCommand { get; }
     public bool IsOptionsPage => Sidebar.SelectedItem?.Id != "history";
     public bool IsHistoryPage => !IsOptionsPage;
     public bool HasLogs => Main.Logs.Count > 0;
@@ -192,18 +192,18 @@ public sealed class TlWorkspaceViewModel : WorkspaceViewModelBase
         OnPropertyChanged(nameof(LanguageHint));
     }
 
-    private void ChooseSdk()
+    private async Task ChooseSdkAsync(CancellationToken cancellationToken)
     {
         var path = _fileDialog.SelectSdkExecutable(_session.SdkPath);
         if (path is null) return;
         _session.SdkPath = path;
-        _ = _session.PersistSettingsAsync();
+        await _session.PersistSettingsAsync(cancellationToken);
     }
 
-    private void ClearSdk()
+    private async Task ClearSdkAsync(CancellationToken cancellationToken)
     {
         _session.SdkPath = string.Empty;
-        _ = _session.PersistSettingsAsync();
+        await _session.PersistSettingsAsync(cancellationToken);
     }
 }
 
@@ -519,12 +519,12 @@ public sealed class ArchiveWorkspaceViewModel : WorkspaceViewModelBase
         var runtime = ResolveRuntime();
         var root = _fileSystem.ValidateProjectRoot(_session.ProjectPath);
         if (runtime is null || !root.IsSuccess || root.Value is null) { if (!root.IsSuccess) _confirmation.ShowDiagnostics("项目路径无效", root.Diagnostics); return; }
-        var files = await _fileSystem.EnumerateFilesAsync(root.Value, "game", "*.rpa", CancellationToken.None);
-        var archives = files.Value?.Select(x => x.RelativePath).ToArray() ?? [];
-        if (archives.Length == 0) { _session.Tasks.StatusMessage = "项目中未找到 RPA。"; return; }
-        if (!_confirmation.Confirm("RPA 解包计划", $"将安全检查并解包 {archives.Length} 个 RPA；已有文件跳过，源 RPA 永不删除。确认继续？", MessageBoxImage.Warning)) return;
         await _session.Tasks.RunAsync("正在安全解包 RPA……", async token =>
         {
+            var files = await _fileSystem.EnumerateFilesAsync(root.Value, "game", "*.rpa", token);
+            var archives = files.Value?.Select(x => x.RelativePath).ToArray() ?? [];
+            if (archives.Length == 0) { _session.Tasks.StatusMessage = "项目中未找到 RPA。"; return; }
+            if (!_confirmation.Confirm("RPA 解包计划", $"将安全检查并解包 {archives.Length} 个 RPA；已有文件跳过，源 RPA 永不删除。确认继续？", MessageBoxImage.Warning)) return;
             var result = await _archive.ExecuteAsync(new ArchiveExtractionRequest(root.Value, new ValidatedToolPath(runtime.Value.Python), new ValidatedToolPath(runtime.Value.RpaTool), archives, "game", true), _session.Tasks.CreateProgress(), token);
             if (!result.IsSuccess) _confirmation.ShowDiagnostics("RPA 解包未完全成功", result.Diagnostics);
             else _session.Tasks.StatusMessage = $"已处理 {result.Value!.ProcessedArchives} 个 RPA；源文件全部保留。";
@@ -536,13 +536,13 @@ public sealed class ArchiveWorkspaceViewModel : WorkspaceViewModelBase
         var runtime = ResolveRuntime();
         var root = _fileSystem.ValidateProjectRoot(_session.ProjectPath);
         if (runtime is null || !root.IsSuccess || root.Value is null) { if (!root.IsSuccess) _confirmation.ShowDiagnostics("项目路径无效", root.Diagnostics); return; }
-        var rpyc = await _fileSystem.EnumerateFilesAsync(root.Value, "game", "*.rpyc", CancellationToken.None);
-        var rpymc = await _fileSystem.EnumerateFilesAsync(root.Value, "game", "*.rpymc", CancellationToken.None);
-        var scripts = (rpyc.Value ?? []).Concat(rpymc.Value ?? []).Select(x => x.RelativePath).ToArray();
-        if (scripts.Length == 0) { _session.Tasks.StatusMessage = "项目中未找到 RPYC/RPYMC。"; return; }
-        if (!_confirmation.Confirm("RPYC 反编译计划", $"将反编译 {scripts.Length} 个脚本；已有 .rpy 跳过，编译文件永不删除。确认继续？", MessageBoxImage.Warning)) return;
         await _session.Tasks.RunAsync("正在反编译脚本……", async token =>
         {
+            var rpyc = await _fileSystem.EnumerateFilesAsync(root.Value, "game", "*.rpyc", token);
+            var rpymc = await _fileSystem.EnumerateFilesAsync(root.Value, "game", "*.rpymc", token);
+            var scripts = (rpyc.Value ?? []).Concat(rpymc.Value ?? []).Select(x => x.RelativePath).ToArray();
+            if (scripts.Length == 0) { _session.Tasks.StatusMessage = "项目中未找到 RPYC/RPYMC。"; return; }
+            if (!_confirmation.Confirm("RPYC 反编译计划", $"将反编译 {scripts.Length} 个脚本；已有 .rpy 跳过，编译文件永不删除。确认继续？", MessageBoxImage.Warning)) return;
             var result = await _decompiler.ExecuteAsync(new ScriptDecompileRequest(root.Value, new ValidatedToolPath(runtime.Value.Python), new ValidatedToolPath(runtime.Value.Unrpyc), scripts, true), _session.Tasks.CreateProgress(), token);
             if (!result.IsSuccess) _confirmation.ShowDiagnostics("反编译未完全成功", result.Diagnostics);
             else _session.Tasks.StatusMessage = $"已处理 {result.Value!.ProcessedScripts} 个脚本；源文件全部保留。";

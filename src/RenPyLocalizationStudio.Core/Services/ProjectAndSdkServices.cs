@@ -149,8 +149,9 @@ public sealed class RenPySdkService : IRenPySdkService
     private readonly IProcessRunnerService _processRunner;
     public RenPySdkService(IFileSystemService fileSystem, IProcessRunnerService processRunner) { _fileSystem = fileSystem; _processRunner = processRunner; }
 
-    public Task<OperationResult<IReadOnlyList<SdkInstallation>>> DiscoverAsync(SdkDiscoveryRequest request, IProgress<ToolOperationProgress> progress, CancellationToken cancellationToken) => Task.Run(() =>
+    public async Task<OperationResult<IReadOnlyList<SdkInstallation>>> DiscoverAsync(SdkDiscoveryRequest request, IProgress<ToolOperationProgress> progress, CancellationToken cancellationToken)
     {
+        await Task.Yield();
         try
         {
             var roots = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -175,7 +176,7 @@ public sealed class RenPySdkService : IRenPySdkService
         catch (OperationCanceledException) { return OperationResult<IReadOnlyList<SdkInstallation>>.Cancelled(new Diagnostic(DiagnosticSeverity.Info, "SDK_DISCOVERY_CANCELLED", "SDK 检测已取消。")); }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         { return OperationResult<IReadOnlyList<SdkInstallation>>.Failure(new Diagnostic(DiagnosticSeverity.Error, "SDK_DISCOVERY_FAILED", ex.Message, Category: DiagnosticCategory.Sdk)); }
-    }, CancellationToken.None);
+    }
 
     public async Task<OperationResult<SdkTranslationSummary>> ExecuteAsync(SdkTranslationRequest request, IProgress<ToolOperationProgress> progress, CancellationToken cancellationToken)
     {

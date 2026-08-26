@@ -425,6 +425,7 @@ public sealed record AppSettings(string? LastProject, string? LastLanguage, stri
 
 public sealed class AppSettingsStore
 {
+    private readonly SemaphoreSlim _writeLock = new(1, 1);
     private static string SettingsPath => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "RenPyLocalizationStudio", "settings.json");
@@ -432,14 +433,14 @@ public sealed class AppSettingsStore
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "RenPyFlowTranslator", "settings.json");
 
-    public async Task<AppSettings> LoadAsync()
+    public async Task<AppSettings> LoadAsync(CancellationToken cancellationToken)
     {
         try
         {
             var path = File.Exists(SettingsPath) ? SettingsPath : LegacySettingsPath;
             if (!File.Exists(path)) return new(null, null, "#D16BA5");
             await using var stream = File.OpenRead(path);
-            return await JsonSerializer.DeserializeAsync<AppSettings>(stream) ?? new(null, null, "#D16BA5");
+            return await JsonSerializer.DeserializeAsync<AppSettings>(stream, cancellationToken: cancellationToken) ?? new(null, null, "#D16BA5");
         }
         catch
         {
@@ -447,11 +448,25 @@ public sealed class AppSettingsStore
         }
     }
 
-    public async Task SaveAsync(AppSettings settings)
+    public async Task SaveAsync(AppSettings settings, CancellationToken cancellationToken)
     {
-        var directory = Path.GetDirectoryName(SettingsPath)!;
-        Directory.CreateDirectory(directory);
-        await using var stream = File.Create(SettingsPath);
-        await JsonSerializer.SerializeAsync(stream, settings, new JsonSerializerOptions { WriteIndented = true });
+        await _writeLock.WaitAsync(cancellationToken);
+        var temporaryPath = SettingsPath + $".{Guid.NewGuid():N}.tmp";
+        try
+        {
+            var directory = Path.GetDirectoryName(SettingsPath)!;
+            Directory.CreateDirectory(directory);
+            await using (var stream = new FileStream(temporaryPath, FileMode.CreateNew, FileAccess.Write, FileShare.None, 16384, FileOptions.Asynchronous))
+            {
+                await JsonSerializer.SerializeAsync(stream, settings, new JsonSerializerOptions { WriteIndented = true }, cancellationToken);
+                await stream.FlushAsync(cancellationToken);
+            }
+            File.Move(temporaryPath, SettingsPath, true);
+        }
+        finally
+        {
+            if (File.Exists(temporaryPath)) File.Delete(temporaryPath);
+            _writeLock.Release();
+        }
     }
 }

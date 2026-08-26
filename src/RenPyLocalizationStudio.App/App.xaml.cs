@@ -21,6 +21,11 @@ public partial class App : Application
         var theme = new ThemeService();
         var settings = new AppSettingsStore();
         var tasks = new TaskCenterViewModel();
+        var taskCoordinator = new WorkspaceTaskCoordinator(exception =>
+        {
+            tasks.StatusMessage = $"后台任务失败：{exception.Message}";
+            tasks.Logs.Add(new ToolLogEntry(exception.Message, "Error"));
+        });
         var messenger = WeakReferenceMessenger.Default;
 
         var session = new ProjectSessionViewModel(
@@ -41,7 +46,7 @@ public partial class App : Application
             new ArchiveExtractionService(fileSystem, processRunner), new ScriptDecompilerService(fileSystem, processRunner),
             new PrefixRenameService(fileSystem), new ImageCompressionService(fileSystem), confirmation);
         var diagnostics = new DiagnosticsWorkspaceViewModel(session, messenger);
-        var main = new MainViewModel(session, tasks, theme, messenger, translation, tl, extra, patch, archive, diagnostics);
+        var main = new MainViewModel(session, tasks, theme, taskCoordinator, messenger, translation, tl, extra, patch, archive, diagnostics);
 
         MainWindow = new MainWindow(main);
         MainWindow.Show();

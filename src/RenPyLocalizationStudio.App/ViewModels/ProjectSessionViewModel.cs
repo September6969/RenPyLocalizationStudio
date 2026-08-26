@@ -105,7 +105,7 @@ public sealed class ProjectSessionViewModel : ObservableObject
 
     public async Task InitializeAsync()
     {
-        var saved = await _settings.LoadAsync();
+        var saved = await _settings.LoadAsync(CancellationToken.None);
         _theme.TryApplyAccent(saved.AccentColor, out _);
         if (!string.IsNullOrWhiteSpace(saved.SdkPath)) _sdkPath = saved.SdkPath;
         if (!string.IsNullOrWhiteSpace(saved.LastProject) && Directory.Exists(saved.LastProject))
@@ -170,7 +170,8 @@ public sealed class ProjectSessionViewModel : ObservableObject
         });
     }
 
-    public Task PersistSettingsAsync() => _settings.SaveAsync(new AppSettings(ProjectPath, Language, _theme.AccentColor, _sdkPath));
+    public Task PersistSettingsAsync(CancellationToken cancellationToken = default) =>
+        _settings.SaveAsync(new AppSettings(ProjectPath, Language, _theme.AccentColor, _sdkPath), cancellationToken);
 
     private async Task ChooseProjectAsync()
     {
@@ -190,7 +191,7 @@ public sealed class ProjectSessionViewModel : ObservableObject
             return;
         }
         Snapshot = result.Value;
-        await PersistSettingsAsync();
+        await PersistSettingsAsync(token);
         Tasks.StatusMessage = $"完成：{Snapshot.Graph.Nodes.Count:N0} 个流程节点，{Snapshot.TranslationUnits.Count():N0} 个翻译条目，{Snapshot.Diagnostics.Count:N0} 条诊断。";
     }
 

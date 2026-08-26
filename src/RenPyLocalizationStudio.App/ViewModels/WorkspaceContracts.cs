@@ -133,6 +133,11 @@ public sealed class TaskCenterViewModel : ObservableObject
             StatusMessage = "操作已取消。";
             Logs.Add(new ToolLogEntry(StatusMessage, "Warning"));
         }
+        catch (Exception exception)
+        {
+            StatusMessage = $"操作失败：{exception.Message}";
+            Logs.Add(new ToolLogEntry(StatusMessage, "Error"));
+        }
         finally
         {
             IsBusy = false;

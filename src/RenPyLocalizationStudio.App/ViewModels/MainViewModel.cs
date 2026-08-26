@@ -10,6 +10,7 @@ namespace RenPyLocalizationStudio.App.ViewModels;
 public sealed class MainViewModel : ObservableObject, IRecipient<NavigateToSourceRequestMessage>
 {
     private readonly IThemeService _theme;
+    private readonly WorkspaceTaskCoordinator _taskCoordinator;
     private WorkspaceViewModelBase? _currentWorkspace;
     private string _accentColor;
     private Brush _accentPreviewBrush;
@@ -18,6 +19,7 @@ public sealed class MainViewModel : ObservableObject, IRecipient<NavigateToSourc
         ProjectSessionViewModel session,
         TaskCenterViewModel tasks,
         IThemeService theme,
+        WorkspaceTaskCoordinator taskCoordinator,
         IMessenger messenger,
         TranslationWorkspaceViewModel translation,
         TlWorkspaceViewModel tl,
@@ -29,6 +31,7 @@ public sealed class MainViewModel : ObservableObject, IRecipient<NavigateToSourc
         Session = session;
         Tasks = tasks;
         _theme = theme;
+        _taskCoordinator = taskCoordinator;
         TranslationWorkspace = translation;
         Workspaces = [translation, tl, extra, patch, archive, diagnostics];
         _currentWorkspace = translation;
@@ -60,7 +63,7 @@ public sealed class MainViewModel : ObservableObject, IRecipient<NavigateToSourc
             if (value is null || ReferenceEquals(_currentWorkspace, value)) return;
             var previous = _currentWorkspace;
             if (!SetProperty(ref _currentWorkspace, value)) return;
-            _ = ChangeWorkspaceAsync(previous, value);
+            _taskCoordinator.StartLatest("workspace-activation", token => ChangeWorkspaceAsync(previous, value, token));
         }
     }
 
@@ -89,10 +92,11 @@ public sealed class MainViewModel : ObservableObject, IRecipient<NavigateToSourc
         if (!TranslationWorkspace.Navigate(message.Value)) Tasks.StatusMessage = "未能在当前剧情流中定位该诊断来源。";
     }
 
-    private static async Task ChangeWorkspaceAsync(WorkspaceViewModelBase? previous, WorkspaceViewModelBase current)
+    private static async Task ChangeWorkspaceAsync(WorkspaceViewModelBase? previous, WorkspaceViewModelBase current, CancellationToken cancellationToken)
     {
-        if (previous is not null) await previous.DeactivateAsync(CancellationToken.None);
-        await current.ActivateAsync(CancellationToken.None);
+        if (previous is not null) await previous.DeactivateAsync(cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
+        await current.ActivateAsync(cancellationToken);
     }
 
     private async Task ApplyAccentAsync(string? color)
