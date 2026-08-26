@@ -1,0 +1,151 @@
+<Window x:Class="RenPyLocalizationStudio.App.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
+        Title="{Binding WindowTitle}" Width="1500" Height="880" MinWidth="720" MinHeight="560"
+        WindowStyle="None" ResizeMode="CanResize" AllowsTransparency="False"
+        Background="{DynamicResource BackgroundLevel0}" Foreground="{DynamicResource TextPrimaryBrush}"
+        BorderThickness="1" BorderBrush="{DynamicResource BackgroundLevel1}"
+        FontFamily="Microsoft YaHei UI" TextOptions.TextFormattingMode="Display" UseLayoutRounding="True"
+        SizeChanged="OnWindowSizeChanged" StateChanged="OnWindowStateChanged" Closed="OnWindowClosed"
+        PreviewKeyDown="OnWindowPreviewKeyDown">
+    <shell:WindowChrome.WindowChrome>
+        <shell:WindowChrome CaptionHeight="40" ResizeBorderThickness="6" CornerRadius="0"
+                            GlassFrameThickness="0" UseAeroCaptionButtons="False" />
+    </shell:WindowChrome.WindowChrome>
+    <Window.InputBindings>
+        <KeyBinding Key="Up" Modifiers="Alt" Command="{Binding MovePreviousTranslationCommand}" />
+        <KeyBinding Key="Down" Modifiers="Alt" Command="{Binding MoveNextTranslationCommand}" />
+    </Window.InputBindings>
+    <Grid>
+        <Grid.RowDefinitions><RowDefinition Height="40"/><RowDefinition Height="*"/><RowDefinition Height="28"/></Grid.RowDefinitions>
+
+        <Grid Grid.Row="0" Background="{DynamicResource BackgroundLevel1}">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+            <StackPanel Orientation="Horizontal" Margin="14,0,18,0" VerticalAlignment="Center">
+                <TextBlock Text="RLS" Foreground="{DynamicResource BrandAccentBrush}" FontWeight="Bold" Margin="0,0,10,0" />
+                <TextBlock x:Name="FullProductName" Text="RenPy Localization Studio" FontWeight="SemiBold" />
+            </StackPanel>
+            <Grid Grid.Column="1" Margin="10,4,16,4" shell:WindowChrome.IsHitTestVisibleInChrome="True">
+                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                    <TextBlock FontFamily="Segoe Fluent Icons" FontSize="15" Text="&#xE838;" Foreground="{DynamicResource TextMutedBrush}" VerticalAlignment="Center" Margin="0,0,8,0" />
+                    <TextBlock Text="{Binding Session.ProjectName}" FontSize="13" FontWeight="SemiBold" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" ToolTip="{Binding Session.ProjectPath}" />
+                </StackPanel>
+                <Button Grid.Column="1" Content="更改..." Command="{Binding Session.ChooseProjectCommand}"
+                        Style="{StaticResource GhostButtonStyle}" Margin="12,0,0,0" Padding="8,4" />
+            </Grid>
+            <StackPanel x:Name="LanguagePanel" Grid.Column="2" Orientation="Horizontal" Margin="0,0,16,0"
+                        shell:WindowChrome.IsHitTestVisibleInChrome="True">
+                <TextBlock Text="语言" Foreground="{DynamicResource TextMutedBrush}" FontSize="12" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                <ComboBox Width="110" Height="30" VerticalAlignment="Center" ItemsSource="{Binding Session.Languages}" SelectedItem="{Binding Session.Language, UpdateSourceTrigger=PropertyChanged}"
+                          IsEditable="False" ToolTip="目标语言" />
+            </StackPanel>
+            <Grid Grid.Column="3" Margin="0,4,10,4" shell:WindowChrome.IsHitTestVisibleInChrome="True">
+                <StackPanel Orientation="Horizontal">
+                    <ToggleButton x:Name="MoreButton" Width="34" Height="30" ToolTip="更多设置"
+                                  Foreground="{DynamicResource TextMutedBrush}" Background="Transparent" BorderThickness="0"
+                                  FontFamily="Segoe Fluent Icons" FontSize="15" Content="&#xE712;" />
+                    <Border Width="1" Height="18" Background="{DynamicResource BackgroundLevel2}" Margin="8,0" VerticalAlignment="Center" />
+                    <Button Content="分析" Command="{Binding Session.AnalyzeCommand}" Style="{StaticResource GhostButtonStyle}" Margin="4,0,0,0" />
+                    <Button Content="保存" Command="{Binding Session.SaveCommand}" Style="{StaticResource PrimaryButtonStyle}" Margin="8,0,0,0" />
+                    <Button Content="刷新注释" Command="{Binding Session.SaveWithAnnotationsCommand}" Style="{StaticResource GhostButtonStyle}"
+                            Margin="4,0,0,0" ToolTip="保存并刷新流程注释" />
+                    <Button Content="取消" Command="{Binding Tasks.CancelCommand}" Style="{StaticResource GhostButtonStyle}" Margin="4,0,0,0" />
+                </StackPanel>
+                <Popup Placement="Bottom" PlacementTarget="{Binding ElementName=MoreButton}" IsOpen="{Binding IsChecked, ElementName=MoreButton}"
+                       StaysOpen="False" AllowsTransparency="True">
+                    <Border Background="{DynamicResource BackgroundLevel2}" Padding="16" CornerRadius="6"
+                            BorderBrush="{DynamicResource BackgroundLevel1}" BorderThickness="1">
+                        <StackPanel Width="180">
+                            <TextBlock Text="外观设置" FontWeight="SemiBold" FontSize="13" Margin="0,0,0,12" />
+                            <TextBlock Text="强调色" FontSize="11" Foreground="{DynamicResource TextSubtleBrush}" Margin="0,0,0,6" />
+                            <WrapPanel Margin="0,0,0,8">
+                                <Button Style="{StaticResource PresetColorButtonStyle}" Background="#D16BA5" Click="PresetColor_Click" Tag="#D16BA5" ToolTip="粉红" />
+                                <Button Style="{StaticResource PresetColorButtonStyle}" Background="#9B59B6" Click="PresetColor_Click" Tag="#9B59B6" ToolTip="紫色" />
+                                <Button Style="{StaticResource PresetColorButtonStyle}" Background="#3498DB" Click="PresetColor_Click" Tag="#3498DB" ToolTip="经典蓝" />
+                                <Button Style="{StaticResource PresetColorButtonStyle}" Background="#1ABC9C" Click="PresetColor_Click" Tag="#1ABC9C" ToolTip="青绿" />
+                                <Button Style="{StaticResource PresetColorButtonStyle}" Background="#2ECC71" Click="PresetColor_Click" Tag="#2ECC71" ToolTip="翠绿" />
+                                <Button Style="{StaticResource PresetColorButtonStyle}" Background="#E67E22" Click="PresetColor_Click" Tag="#E67E22" ToolTip="活力橙" />
+                                <Button Style="{StaticResource PresetColorButtonStyle}" Background="#E74C3C" Click="PresetColor_Click" Tag="#E74C3C" ToolTip="珊瑚红" />
+                                <Button Style="{StaticResource PresetColorButtonStyle}" Background="#F1C40F" Click="PresetColor_Click" Tag="#F1C40F" ToolTip="金黄" />
+                            </WrapPanel>
+                            <Grid>
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="24"/><ColumnDefinition Width="*"/><ColumnDefinition Width="32"/></Grid.ColumnDefinitions>
+                                <Border Width="16" Height="16" CornerRadius="3" Background="{Binding AccentPreviewBrush}"
+                                        HorizontalAlignment="Left" VerticalAlignment="Center" />
+                                <TextBox Grid.Column="1" Text="{Binding AccentColor, UpdateSourceTrigger=PropertyChanged}" Padding="4" />
+                                <Button Grid.Column="2" Content="&#xE73E;" FontFamily="Segoe Fluent Icons" Command="{Binding ApplyAccentCommand}"
+                                        CommandParameter="{Binding AccentColor}" Style="{StaticResource GhostButtonStyle}" Padding="8,4" ToolTip="应用强调色" />
+                            </Grid>
+                        </StackPanel>
+                    </Border>
+                </Popup>
+            </Grid>
+            <StackPanel Grid.Column="4" Orientation="Horizontal" shell:WindowChrome.IsHitTestVisibleInChrome="True">
+                <Button Click="OnMinimizeClick" Style="{StaticResource TitleBarButtonStyle}" ToolTip="最小化"
+                        AutomationProperties.Name="最小化" FontFamily="Segoe Fluent Icons" FontSize="11" Content="&#xE921;" />
+                <Button x:Name="MaximizeButton" Click="OnMaximizeRestoreClick" Style="{StaticResource TitleBarButtonStyle}" ToolTip="最大化"
+                        AutomationProperties.Name="最大化" FontFamily="Segoe Fluent Icons" FontSize="10" Content="&#xE922;" />
+                <Button Click="OnCloseClick" Style="{StaticResource TitleBarCloseButtonStyle}" ToolTip="关闭"
+                        AutomationProperties.Name="关闭" FontFamily="Segoe Fluent Icons" FontSize="10" Content="&#xE8BB;" />
+            </StackPanel>
+        </Grid>
+
+        <Grid Grid.Row="1">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="48"/><ColumnDefinition Width="Auto"/><ColumnDefinition x:Name="SidebarDividerColumn" Width="1"/>
+                <ColumnDefinition Width="*"/><ColumnDefinition x:Name="InspectorDividerColumn" Width="1"/><ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+            <Grid Grid.Column="0" Background="{DynamicResource BackgroundLevel1}">
+                <Border BorderThickness="0,0,1,0" BorderBrush="{DynamicResource BackgroundLevel2}" />
+                <Canvas IsHitTestVisible="False" ClipToBounds="True">
+                    <Grid x:Name="ActivitySelectionIndicator" Width="48" Height="46" Opacity="0">
+                        <Grid.RenderTransform>
+                            <TranslateTransform x:Name="IndicatorTransform" Y="0" />
+                        </Grid.RenderTransform>
+                        <Border Width="3" Height="24" HorizontalAlignment="Left" VerticalAlignment="Center"
+                                CornerRadius="1.5" Background="{DynamicResource BrandAccentBrush}" />
+                        <Border Margin="6,3" CornerRadius="6" Background="{DynamicResource BrandAccentSoftBrush}" />
+                    </Grid>
+                </Canvas>
+                <ListBox x:Name="ActivityBarList" ItemsSource="{Binding Workspaces}" SelectedItem="{Binding CurrentWorkspace}"
+                         Background="Transparent" BorderThickness="0" ItemContainerStyle="{StaticResource ActivityItemStyle}"
+                         SelectionChanged="ActivityBarList_SelectionChanged">
+                    <ListBox.ItemTemplate>
+                        <DataTemplate>
+                            <Grid ToolTip="{Binding Title}">
+                                <TextBlock Text="{Binding Glyph}" FontFamily="Segoe Fluent Icons" FontSize="18" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                <Border Background="{DynamicResource SemanticErrorBrush}" CornerRadius="8" HorizontalAlignment="Right" VerticalAlignment="Top"
+                                        MinWidth="16" Height="16" Margin="0,-7,-9,0" Visibility="{Binding HasBadge, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                    <TextBlock Text="{Binding Badge}" FontSize="9" HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="White" Margin="3,0" />
+                                </Border>
+                            </Grid>
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
+            </Grid>
+            <ContentControl x:Name="SidebarHost" Grid.Column="1" Width="260" Content="{Binding CurrentWorkspace.SidebarContent}"
+                            Background="{DynamicResource BackgroundLevel1}" />
+            <Border Grid.Column="2" Background="{DynamicResource BackgroundLevel2}" />
+            <ContentControl x:Name="MainHost" Grid.Column="3" Content="{Binding CurrentWorkspace.MainContent}" Background="{DynamicResource BackgroundLevel0}" />
+            <Border Grid.Column="4" Background="{DynamicResource BackgroundLevel2}" />
+            <ContentControl x:Name="InspectorHost" Grid.Column="5" Width="360" Content="{Binding CurrentWorkspace.InspectorContent}"
+                            Background="{DynamicResource BackgroundLevel1}"
+                            Visibility="{Binding CurrentWorkspace.IsInspectorVisible, Converter={StaticResource BooleanToVisibilityConverter}}" />
+        </Grid>
+
+        <Grid Grid.Row="2" Background="{DynamicResource BackgroundLevel1}">
+            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="180"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+            <TextBlock Text="{Binding Tasks.StatusMessage}" Margin="10,0" VerticalAlignment="Center" FontSize="11"
+                       Foreground="{DynamicResource TextMutedBrush}" TextTrimming="CharacterEllipsis" />
+            <ProgressBar Grid.Column="1" Height="3" VerticalAlignment="Bottom" BorderThickness="0" Background="Transparent"
+                         Foreground="{DynamicResource BrandAccentBrush}" IsIndeterminate="{Binding Tasks.IsBusy}" />
+            <TextBlock Grid.Column="2" Text="Alt+↑ / Alt+↓ 切换译文" Margin="12,0" VerticalAlignment="Center" FontSize="11"
+                       Foreground="{DynamicResource TextSubtleBrush}" />
+        </Grid>
+    </Grid>
+</Window>

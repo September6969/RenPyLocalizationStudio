@@ -1,0 +1,19 @@
+bin/
+obj/
+.vs/
+artifacts/
+TestResults/
+*.user
+*.suo
+*.rpy.rft.bak
+*.rft.tmp
+*.rls.bak
+*.tmp
+
+# Ren'Py 运行生成物
+**/game/cache/
+**/game/saves/
+**/log.txt
+**/traceback.txt
+**/*.rpyc
+**/*.rpymc

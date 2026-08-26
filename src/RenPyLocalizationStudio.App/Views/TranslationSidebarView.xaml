@@ -1,0 +1,80 @@
+<UserControl x:Class="RenPyLocalizationStudio.App.Views.TranslationSidebarView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="clr-namespace:RenPyLocalizationStudio.App.ViewModels"
+             xmlns:core="clr-namespace:RenPyLocalizationStudio.Core;assembly=RenPyLocalizationStudio.Core">
+    <Grid Margin="14,14,10,10">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+        <TextBlock Text="项目导航" FontSize="15" FontWeight="SemiBold" />
+        <TextBlock Grid.Row="1" Text="搜索、分组与 Label 定位" Margin="0,4,0,10" FontSize="11" Foreground="{DynamicResource TextMutedBrush}" />
+        <TextBox Grid.Row="2" Text="{Binding Workspace.SearchText, UpdateSourceTrigger=PropertyChanged}" ToolTip="搜索 label、原文、译文或路径" />
+        <ListBox Grid.Row="3" ItemsSource="{Binding Workspace.ViewModes}" SelectedItem="{Binding Workspace.ViewMode, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                 Margin="0,8,0,0" Background="Transparent" BorderThickness="0" ItemContainerStyle="{StaticResource SidebarTabItemStyle}"
+                 ScrollViewer.HorizontalScrollBarVisibility="Disabled" ScrollViewer.VerticalScrollBarVisibility="Disabled">
+            <ListBox.ItemsPanel><ItemsPanelTemplate><StackPanel Orientation="Horizontal" /></ItemsPanelTemplate></ListBox.ItemsPanel>
+            <ListBox.ItemTemplate>
+                <DataTemplate>
+                    <TextBlock>
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock">
+                                <Setter Property="Text" Value="{Binding}" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding}" Value="{x:Static vm:TranslationViewMode.Flow}"><Setter Property="Text" Value="剧情流" /></DataTrigger>
+                                    <DataTrigger Binding="{Binding}" Value="{x:Static vm:TranslationViewMode.Strings}"><Setter Property="Text" Value="字符串表" /></DataTrigger>
+                                    <DataTrigger Binding="{Binding}" Value="{x:Static vm:TranslationViewMode.Unbound}"><Setter Property="Text" Value="未绑定" /></DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
+                </DataTemplate>
+            </ListBox.ItemTemplate>
+        </ListBox>
+        <ListBox Grid.Row="4" ItemsSource="{Binding Workspace.GroupingModes}" SelectedItem="{Binding Workspace.GroupingMode, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                 Margin="0,4,0,8" Background="Transparent" BorderThickness="0" ItemContainerStyle="{StaticResource SidebarTabItemStyle}"
+                 ScrollViewer.HorizontalScrollBarVisibility="Disabled" ScrollViewer.VerticalScrollBarVisibility="Disabled">
+            <ListBox.Style>
+                <Style TargetType="ListBox">
+                    <Setter Property="Visibility" Value="Collapsed" />
+                    <Style.Triggers>
+                        <DataTrigger Binding="{Binding Workspace.ViewMode}" Value="{x:Static vm:TranslationViewMode.Flow}"><Setter Property="Visibility" Value="Visible" /></DataTrigger>
+                    </Style.Triggers>
+                </Style>
+            </ListBox.Style>
+            <ListBox.ItemsPanel><ItemsPanelTemplate><StackPanel Orientation="Horizontal" /></ItemsPanelTemplate></ListBox.ItemsPanel>
+            <ListBox.ItemTemplate>
+                <DataTemplate>
+                    <TextBlock>
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock">
+                                <Setter Property="Text" Value="{Binding}" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding}" Value="{x:Static core:FlowGroupingMode.StoryPath}"><Setter Property="Text" Value="路径" /></DataTrigger>
+                                    <DataTrigger Binding="{Binding}" Value="{x:Static core:FlowGroupingMode.SourceFile}"><Setter Property="Text" Value="文件" /></DataTrigger>
+                                    <DataTrigger Binding="{Binding}" Value="{x:Static core:FlowGroupingMode.Label}"><Setter Property="Text" Value="Label" /></DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
+                </DataTemplate>
+            </ListBox.ItemTemplate>
+        </ListBox>
+        <TextBlock Grid.Row="5" Text="{Binding Workspace.NavigationHeading}" FontSize="11" FontWeight="SemiBold" Foreground="{DynamicResource TextSubtleBrush}" Margin="2,0,0,4" />
+        <ListBox x:Name="LabelList" Grid.Row="6" ItemsSource="{Binding Workspace.Labels}" SelectedItem="{Binding Workspace.SelectedLabel}"
+                 MouseDoubleClick="LabelList_MouseDoubleClick" PreviewKeyDown="LabelList_PreviewKeyDown"
+                 Background="Transparent" BorderThickness="0" ItemContainerStyle="{StaticResource FlatListItemStyle}"
+                 VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling"
+                 ScrollViewer.IsDeferredScrollingEnabled="True" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+            <ListBox.ItemTemplate>
+                <DataTemplate>
+                    <StackPanel>
+                        <TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                        <TextBlock Text="{Binding Location}" FontSize="11" Foreground="{DynamicResource PathTextBrush}" TextTrimming="CharacterEllipsis" />
+                    </StackPanel>
+                </DataTemplate>
+            </ListBox.ItemTemplate>
+        </ListBox>
+    </Grid>
+</UserControl>

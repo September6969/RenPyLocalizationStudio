@@ -1,0 +1,99 @@
+<UserControl x:Class="RenPyLocalizationStudio.App.Views.TranslationInspectorView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:avalonEdit="http://icsharpcode.net/sharpdevelop/avalonedit"
+             xmlns:behaviors="clr-namespace:RenPyLocalizationStudio.App.Behaviors"
+             xmlns:selectors="clr-namespace:RenPyLocalizationStudio.App.Selectors">
+    <UserControl.Resources>
+        <DataTemplate x:Key="EmptyInspectorTemplate">
+            <Grid>
+                <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="250">
+                    <TextBlock Text="&#xE8A5;" FontFamily="Segoe Fluent Icons" FontSize="30" Opacity="0.2"
+                               HorizontalAlignment="Center" Foreground="{DynamicResource TextMutedBrush}" />
+                    <TextBlock Text="请在剧情流中选择节点以编辑译文" Margin="0,12,0,0" TextAlignment="Center"
+                               FontSize="11" Foreground="{DynamicResource TextSubtleBrush}" Opacity="0.75" TextWrapping="Wrap" />
+                </StackPanel>
+            </Grid>
+        </DataTemplate>
+
+        <DataTemplate x:Key="FlowInspectorTemplate">
+            <Grid Margin="0,12,0,0">
+                <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+                <TextBlock Text="{Binding Title}" FontWeight="SemiBold" Foreground="{DynamicResource DialogueTextBrush}" TextWrapping="Wrap" />
+                <TextBlock Grid.Row="1" Text="{Binding Details}" Margin="0,5,0,0" FontSize="11"
+                           Foreground="{DynamicResource PathTextBrush}" TextWrapping="Wrap" />
+                <StackPanel Grid.Row="2" HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="250">
+                    <TextBlock Text="&#xE8FD;" FontFamily="Segoe Fluent Icons" FontSize="26" Opacity="0.2"
+                               HorizontalAlignment="Center" Foreground="{DynamicResource TextMutedBrush}" />
+                    <TextBlock Text="这是流程节点，没有可编辑译文" Margin="0,10,0,0" TextAlignment="Center"
+                               FontSize="11" Foreground="{DynamicResource TextSubtleBrush}" />
+                </StackPanel>
+            </Grid>
+        </DataTemplate>
+
+        <DataTemplate x:Key="TranslationEditorTemplate">
+            <Grid DataContext="{Binding Owner}" Margin="0,10,0,0">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/><RowDefinition Height="*"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/><RowDefinition Height="*"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+                
+                <TextBlock Text="{Binding Title}" FontWeight="SemiBold" Foreground="{DynamicResource DialogueTextBrush}" TextWrapping="Wrap" />
+                <TextBlock Grid.Row="1" Text="{Binding Location}" Margin="0,3,0,12" FontSize="11" Foreground="{DynamicResource PathTextBrush}" TextWrapping="Wrap" />
+                
+                <TextBlock Grid.Row="2" Text="原文" FontSize="11" FontWeight="Medium" Foreground="{DynamicResource TextMutedBrush}" Margin="0,0,0,4" />
+                <Border Grid.Row="3" Background="{DynamicResource BackgroundLevel1}" CornerRadius="4" Padding="8,6">
+                    <avalonEdit:TextEditor IsReadOnly="True" WordWrap="True" ShowLineNumbers="False"
+                                           Background="Transparent" Foreground="{DynamicResource DialogueTextBrush}"
+                                           FontFamily="Cascadia Code, Cascadia Mono, Consolas" FontSize="13"
+                                           behaviors:AvalonEditBindingBehavior.BindableText="{Binding SourceText, Mode=OneWay}"
+                                           behaviors:AvalonEditBindingBehavior.DocumentKey="{Binding DocumentKey}" />
+                </Border>
+                
+                <ItemsControl Grid.Row="4" ItemsSource="{Binding PlaceholderTokens}" Margin="0,8">
+                    <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <Border Background="{DynamicResource BrandAccentSoftBrush}" CornerRadius="4" Padding="6,2" Margin="0,0,6,4">
+                                <TextBlock Text="{Binding}" Foreground="{DynamicResource BrandAccentBrush}" FontFamily="Cascadia Code, Consolas" FontSize="11" />
+                            </Border>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+                
+                <TextBlock Grid.Row="5" Text="译文" FontSize="11" FontWeight="Medium" Foreground="{DynamicResource TextMutedBrush}" Margin="0,8,0,4" />
+                <Border Grid.Row="6" Background="{DynamicResource BackgroundLevel0}" BorderBrush="{DynamicResource BackgroundLevel1}" BorderThickness="1" CornerRadius="4" Padding="8,6">
+                    <avalonEdit:TextEditor WordWrap="True" ShowLineNumbers="False"
+                                           Background="Transparent" Foreground="{DynamicResource DialogueTextBrush}"
+                                           FontFamily="Cascadia Code, Microsoft YaHei UI" FontSize="14"
+                                           behaviors:AvalonEditBindingBehavior.BindableText="{Binding TranslationText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                           behaviors:AvalonEditBindingBehavior.DocumentKey="{Binding DocumentKey}"
+                                           behaviors:AvalonEditBindingBehavior.IsReadOnly="{Binding IsReadOnly}"
+                                           behaviors:AvalonEditBindingBehavior.FocusRequest="{Binding FocusRequest}" />
+                </Border>
+                
+                <StackPanel Grid.Row="7" Margin="0,8,0,0">
+                    <TextBlock Text="{Binding Impact}" Foreground="{DynamicResource BrandAccentBrush}" FontSize="12" TextWrapping="Wrap" />
+                    <TextBlock Text="{Binding ValidationMessage}" Foreground="{DynamicResource SemanticErrorBrush}" FontSize="12" TextWrapping="Wrap" Margin="0,4,0,0" />
+                    <Button Content="统一冲突译文" Command="{Binding UnifyConflictCommand}" Style="{StaticResource GhostButtonStyle}"
+                            HorizontalAlignment="Left" Margin="0,6,0,0" Padding="12,6"
+                            Visibility="{Binding HasConflict, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                </StackPanel>
+            </Grid>
+        </DataTemplate>
+
+        <selectors:InspectorStateTemplateSelector x:Key="InspectorTemplateSelector"
+                                                  EmptyTemplate="{StaticResource EmptyInspectorTemplate}"
+                                                  FlowTemplate="{StaticResource FlowInspectorTemplate}"
+                                                  TranslationEditorTemplate="{StaticResource TranslationEditorTemplate}" />
+    </UserControl.Resources>
+    <Grid Margin="14,12">
+        <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+        <TextBlock Text="翻译检查器" FontSize="15" FontWeight="SemiBold" />
+        <ContentControl Grid.Row="1" Content="{Binding CurrentInspectorState}"
+                        ContentTemplateSelector="{StaticResource InspectorTemplateSelector}" />
+    </Grid>
+</UserControl>

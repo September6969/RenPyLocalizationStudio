@@ -1,0 +1,137 @@
+using RenPyLocalizationStudio.App.ViewModels;
+using RenPyLocalizationStudio.App.Behaviors;
+using RenPyLocalizationStudio.Core;
+using ICSharpCode.AvalonEdit;
+
+namespace RenPyLocalizationStudio.Tests;
+
+public sealed class VisualPresentationTests
+{
+    [Fact]
+    public void CodeEditor_Tab在空行插入四个空格且Caret保持有效()
+    {
+        Exception? captured = null;
+        string? text = null;
+        var caret = -1;
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                var editor = new TextEditor { Text = string.Empty };
+                editor.CaretOffset = 0;
+                RenPyCodeEditorBehavior.ApplyTab(editor, false);
+                text = editor.Text;
+                caret = editor.CaretOffset;
+            }
+            catch (Exception exception) { captured = exception; }
+        });
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        thread.Join();
+
+        Assert.Null(captured);
+        Assert.Equal("    ", text);
+        Assert.Equal(4, caret);
+    }
+
+    [Fact]
+    public void TranslationNavigation_随路径文件与Label投影切换内容()
+    {
+        var snapshot = new ProjectSnapshot { ProjectRoot = "X", GameDirectory = "X/game", Language = "schinese" };
+        var start = new FlowNode { Id = "start", Kind = FlowNodeKind.Label, DisplayText = "label start", LabelName = "start", Region = new SourceRegion("game/a.rpy", 1, 1), Indent = 0 };
+        var room = new FlowNode { Id = "room", Kind = FlowNodeKind.Label, DisplayText = "label room", LabelName = "room", Region = new SourceRegion("game/b.rpy", 1, 1), Indent = 0 };
+        var jump = new FlowNode { Id = "jump", Kind = FlowNodeKind.Jump, DisplayText = "jump room", Target = "room", Region = new SourceRegion("game/a.rpy", 2, 2), Indent = 4 };
+        snapshot.Graph.Nodes.AddRange([start, jump, room]);
+        snapshot.Graph.Labels["start"] = start;
+        snapshot.Graph.Labels["room"] = room;
+
+        var paths = TranslationNavigationBuilder.Build(snapshot, FlowGroupingMode.StoryPath);
+        var files = TranslationNavigationBuilder.Build(snapshot, FlowGroupingMode.SourceFile);
+        var labels = TranslationNavigationBuilder.Build(snapshot, FlowGroupingMode.Label);
+
+        Assert.Single(paths);
+        Assert.Equal("start", paths[0].Name);
+        Assert.Equal(["a.rpy", "b.rpy"], files.Select(item => item.Name));
+        Assert.Equal(["start", "room"], labels.Select(item => item.Name));
+        Assert.All(files, item => Assert.StartsWith("group:SourceFile:", item.NodeId));
+    }
+
+    [Fact]
+    public void ContentItem_分离说话人与正文并隐藏正常绑定状态()
+    {
+        var node = DialogueNode("uv", "正文: 保留冒号");
+        var unit = Unit(node, "译文");
+
+        var item = ContentItem.FromFlow(node, unit, null, 0);
+
+        Assert.Equal("uv", item.SpeakerText);
+        Assert.Equal("uv: ", item.SpeakerPrefix);
+        Assert.Equal("正文: 保留冒号", item.BodyText);
+        Assert.Equal(TranslationStatusKind.Bound, item.StatusKind);
+        Assert.False(item.IsStatusVisible);
+        Assert.True(item.IsTranslationComplete);
+    }
+
+    [Fact]
+    public void ContentItem_缺少New与冲突保持显眼状态()
+    {
+        var missing = Unit(null, string.Empty, missingNew: true);
+        var missingItem = ContentItem.FromTranslation(missing);
+        var shared = new SharedStringEntry { Language = "schinese", OldText = "Start", HasConflict = true };
+        var conflictItem = ContentItem.FromSharedString(shared);
+
+        Assert.Equal(TranslationStatusKind.Missing, missingItem.StatusKind);
+        Assert.True(missingItem.IsStatusVisible);
+        Assert.Equal("缺少 new", missingItem.Badge);
+        Assert.Equal(TranslationStatusKind.Conflict, conflictItem.StatusKind);
+        Assert.True(conflictItem.IsStatusVisible);
+    }
+
+    [Fact]
+    public void Coverage_只统计可编辑条目且空译文不算完成()
+    {
+        var node = DialogueNode("uv", "正文");
+        var completed = ContentItem.FromFlow(node, Unit(node, "完成"), null, 0);
+        var empty = ContentItem.FromFlow(DialogueNode(null, "空"), Unit(node, string.Empty), null, 0);
+        var label = ContentItem.FromFlow(new FlowNode
+        {
+            Id = "label", Kind = FlowNodeKind.Label, DisplayText = "label start",
+            Region = new SourceRegion("game/script.rpy", 1, 1), LabelName = "start", Indent = 0
+        }, null, null, 0);
+
+        var coverage = TranslationCoverageCalculator.Calculate([completed, empty, label]);
+
+        Assert.Equal(2, coverage.EditableCount);
+        Assert.Equal(1, coverage.TranslatedCount);
+        Assert.Equal(50, coverage.Percentage);
+    }
+
+    [Fact]
+    public void Inspector_空流程与编辑状态使用不同状态对象()
+    {
+        var inspector = new TranslationInspectorViewModel(new TaskCenterViewModel());
+        Assert.IsType<EmptyInspectorStateViewModel>(inspector.CurrentInspectorState);
+
+        inspector.SetTarget(null, "jump target", "game/script.rpy:12");
+        Assert.IsType<FlowInspectorStateViewModel>(inspector.CurrentInspectorState);
+
+        inspector.SetTarget(EditorTarget.ForUnit(Unit(null, "译文")));
+        Assert.IsType<TranslationEditorInspectorStateViewModel>(inspector.CurrentInspectorState);
+    }
+
+    private static FlowNode DialogueNode(string? speaker, string text) => new()
+    {
+        Id = Guid.NewGuid().ToString("N"), Kind = FlowNodeKind.Dialogue,
+        DisplayText = speaker is null ? text : $"{speaker}: {text}", Speaker = speaker, OriginalText = text,
+        Region = new SourceRegion("game/script.rpy", 2, 2), Indent = 4
+    };
+
+    private static TranslationUnit Unit(FlowNode? node, string translation, bool missingNew = false) => new()
+    {
+        Kind = missingNew ? TranslationUnitKind.String : TranslationUnitKind.Dialogue,
+        Language = "schinese", FilePath = "E:\\game\\tl\\schinese\\script.rpy", RelativeTlPath = "script.rpy",
+        BlockSpan = new TextSpan(0, 1), HeaderLine = 1, TranslationText = translation,
+        TranslationValueSpan = missingNew ? null : new TextSpan(0, translation.Length), MissingNew = missingNew,
+        BoundNode = node
+    };
+}

@@ -1,0 +1,3 @@
+<UserControl x:Class="RenPyLocalizationStudio.App.Views.PatchInspectorView" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <StackPanel Margin="14,12"><TextBlock Text="补丁检查器" FontSize="15" FontWeight="SemiBold"/><TextBlock Text="{Binding Document.Title}" Margin="0,16,0,5" FontWeight="SemiBold"/><TextBlock Text="受管区块之外的代码、注释、BOM 与换行形式会保持不变。" TextWrapping="Wrap" Foreground="{DynamicResource TextMutedBrush}"/><TextBlock Text="未应用的 Diff 会以强调色圆点标记。" Margin="0,14,0,0" TextWrapping="Wrap"/></StackPanel>
+</UserControl>

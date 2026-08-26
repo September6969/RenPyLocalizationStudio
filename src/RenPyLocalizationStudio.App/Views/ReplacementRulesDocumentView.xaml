@@ -1,0 +1,17 @@
+<UserControl x:Class="RenPyLocalizationStudio.App.Views.ReplacementRulesDocumentView" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <Grid Margin="12,10"><Grid.RowDefinitions><RowDefinition Height="42"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+        <DockPanel><TextBlock Text="精确替换规则" VerticalAlignment="Center" FontWeight="SemiBold"/><StackPanel Orientation="Horizontal" HorizontalAlignment="Right"><Button Content="添加" Command="{Binding AddCommand}" Style="{StaticResource GhostButtonStyle}"/><Button Content="删除" Command="{Binding RemoveCommand}" Style="{StaticResource GhostButtonStyle}" Margin="8,0,0,0"/><Button Content="验证并预览" Command="{Binding PreviewCommand}" Style="{StaticResource PrimaryButtonStyle}" Margin="8,0,0,0"/></StackPanel></DockPanel>
+        <DataGrid Grid.Row="1" ItemsSource="{Binding Rules}" SelectedItem="{Binding SelectedRule}" AutoGenerateColumns="False" CanUserAddRows="False"
+                  Background="{DynamicResource BackgroundLevel0}" Foreground="{DynamicResource TextPrimaryBrush}" RowBackground="{DynamicResource BackgroundLevel0}"
+                  AlternatingRowBackground="{DynamicResource BackgroundLevel1}" BorderThickness="0" GridLinesVisibility="Horizontal" HorizontalGridLinesBrush="{DynamicResource BackgroundLevel2}">
+            <DataGrid.Columns>
+                <DataGridCheckBoxColumn Header="启用" Binding="{Binding Enabled}" Width="54"/>
+                <DataGridTextColumn Header="顺序" Binding="{Binding Order}" Width="58"/>
+                <DataGridTextColumn Header="原文" Binding="{Binding Source, UpdateSourceTrigger=PropertyChanged}" Width="*"/>
+                <DataGridTextColumn Header="替换为" Binding="{Binding Replacement, UpdateSourceTrigger=PropertyChanged}" Width="*"/>
+                <DataGridTextColumn Header="说明" Binding="{Binding Description}" Width="160"/>
+            </DataGrid.Columns>
+        </DataGrid>
+        <TextBlock Grid.Row="2" Text="{Binding Diagnostics}" Foreground="{DynamicResource SemanticWarningBrush}" Margin="0,8,0,0" TextWrapping="Wrap"/>
+    </Grid>
+</UserControl>
