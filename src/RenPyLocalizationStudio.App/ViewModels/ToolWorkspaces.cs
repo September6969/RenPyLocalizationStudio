@@ -68,7 +68,7 @@ public sealed class TlWorkspaceViewModel : WorkspaceViewModelBase
         Sidebar.Items.Add(new SidebarOption("options", "生成选项", "\uE713"));
         Sidebar.Items.Add(new SidebarOption("history", "执行日志", "\uE81C"));
         Sidebar.SelectedItem = Sidebar.Items[0];
-        Main = new TlMainContentViewModel(this) { Title = "生成翻译文件", Description = "沿用 Ren'Py Launcher 的语言输入和生成选项，并在执行前展示完整计划。" };
+        Main = new TlMainContentViewModel(this) { Title = "生成翻译文件", Description = string.Empty };
         PreflightCommand = new AsyncRelayCommand(() => RunAsync(true));
         GenerateCommand = new AsyncRelayCommand(() => RunAsync(false));
         ClearLogsCommand = new RelayCommand(Main.Logs.Clear, () => Main.Logs.Count > 0);
@@ -119,7 +119,7 @@ public sealed class TlWorkspaceViewModel : WorkspaceViewModelBase
     public bool HasLogs => Main.Logs.Count > 0;
     public string LogCountText => $"{Main.Logs.Count:N0} 条记录";
     public string PageTitle => IsHistoryPage ? "执行日志" : "生成翻译文件";
-    public string PageDescription => IsHistoryPage ? "查看 SDK 命令、缺失统计、标准输出与错误信息。" : "沿用 Ren'Py Launcher 的语言输入和生成选项，并在执行前展示完整计划。";
+    public string PageDescription => IsHistoryPage ? "查看 SDK 命令、缺失统计、标准输出与错误信息。" : string.Empty;
     public bool Empty { get => _empty; set { if (SetProperty(ref _empty, value)) NotifyPreview(); } }
     public bool StringsOnly { get => _stringsOnly; set { if (SetProperty(ref _stringsOnly, value)) NotifyPreview(); } }
     public bool NoTodo { get => _noTodo; set { if (SetProperty(ref _noTodo, value)) NotifyPreview(); } }

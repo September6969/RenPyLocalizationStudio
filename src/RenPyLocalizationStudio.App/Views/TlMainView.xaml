@@ -7,7 +7,18 @@
             <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
             <StackPanel>
                 <TextBlock Text="{Binding Workspace.PageTitle}" FontSize="18" FontWeight="SemiBold"/>
-                <TextBlock Text="{Binding Workspace.PageDescription}" Margin="0,4,0,0" FontSize="11" Foreground="{DynamicResource TextMutedBrush}"/>
+                <TextBlock Text="{Binding Workspace.PageDescription}" Margin="0,4,0,0" FontSize="11" Foreground="{DynamicResource TextMutedBrush}">
+                    <TextBlock.Style>
+                        <Style TargetType="TextBlock">
+                            <Setter Property="Visibility" Value="Visible"/>
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding Workspace.PageDescription}" Value="">
+                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </TextBlock.Style>
+                </TextBlock>
             </StackPanel>
             <StackPanel x:Name="OptionsActions" Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Top">
                 <Button Content="执行预检" Command="{Binding Workspace.PreflightCommand}" Style="{StaticResource GhostButtonStyle}" Margin="0,0,8,0"/>
@@ -67,9 +78,14 @@
                             Style="{StaticResource GhostButtonStyle}" Padding="10,5"/>
                     <Button Grid.Column="3" Content="清除" Command="{Binding Workspace.ClearSdkCommand}"
                             Style="{StaticResource GhostButtonStyle}" Padding="10,5" Margin="4,0,0,0"/>
-                    <TextBlock Grid.Row="1" Grid.ColumnSpan="4" Text="{Binding Workspace.SdkSummary}"
+                    <TextBlock Grid.Row="1" Grid.ColumnSpan="2" Text="{Binding Workspace.SdkSummary}"
                                Margin="0,6,0,0" FontSize="11" Foreground="{DynamicResource TextSubtleBrush}"
                                TextTrimming="CharacterEllipsis"/>
+                    <TextBlock Grid.Row="1" Grid.Column="2" Grid.ColumnSpan="2" Margin="8,6,0,0"
+                               HorizontalAlignment="Right" FontSize="11">
+                        <Hyperlink NavigateUri="https://www.renpy.org/" RequestNavigate="OpenOfficialSdkPage"
+                                   Foreground="{DynamicResource BrandAccentBrush}">下载 Ren’Py SDK（官网）</Hyperlink>
+                    </TextBlock>
                 </Grid>
                 <StackPanel Grid.Row="2" VerticalAlignment="Center" HorizontalAlignment="Center" Opacity="0.7">
                     <TextBlock Text="" FontFamily="Segoe Fluent Icons" FontSize="28" HorizontalAlignment="Center" Foreground="{DynamicResource TextSubtleBrush}"/>
