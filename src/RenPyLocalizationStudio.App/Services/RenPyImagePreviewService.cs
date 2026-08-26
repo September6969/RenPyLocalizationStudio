@@ -5,28 +5,24 @@ using System.Windows.Media.Imaging;
 
 namespace RenPyLocalizationStudio.App.Services;
 
-public sealed record ImagePreviewInfo(
-    string Tag,
-    string Kind,
-    string FilePath,
-    string RelativePath,
-    string Resolution,
-    string FileSizeText);
-
-public sealed record RenPySceneContext(
-    string? SceneStatement,
-    string? SceneTag,
-    IReadOnlyList<ImagePreviewInfo> AvailableImages);
+public sealed record ImagePreviewInfo(string Tag, string Kind, string FilePath, string RelativePath, string Resolution, string FileSizeText);
+public sealed record RenPySceneContext(string? SceneStatement, string? SceneTag, IReadOnlyList<ImagePreviewInfo> AvailableImages);
+public sealed record RenPyImagePreviewRequest(string ProjectPath, string? RelativeScriptPath, int Line, string? StableNodeId = null);
 
 public interface IRenPyImagePreviewService
 {
-    Task<RenPySceneContext> ResolveSceneContextAsync(string projectPath, string? relativeScriptPath, int line);
+    Task<RenPySceneContext> ResolveSceneContextAsync(RenPyImagePreviewRequest request, CancellationToken cancellationToken);
+    void InvalidateProject(string projectPath);
 }
 
-public sealed partial class RenPyImagePreviewService : IRenPyImagePreviewService
+public sealed partial class RenPyImagePreviewService : IRenPyImagePreviewService, IDisposable
 {
-    private static readonly string[] ImageExtensions = [".png", ".webp", ".jpg", ".jpeg", ".avif", ".bmp"];
-    private static readonly ConcurrentDictionary<string, (DateTime ScannedAt, List<string> Files)> ProjectImageCache = new();
+    private static readonly HashSet<string> ImageExtensions = new([".png", ".webp", ".jpg", ".jpeg", ".avif", ".bmp"], StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, ProjectAssetIndex> _indexes = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, SemaphoreSlim> _indexLocks = new(StringComparer.OrdinalIgnoreCase);
+    private int _indexBuildCount;
+
+    internal int IndexBuildCount => Volatile.Read(ref _indexBuildCount);
 
     [GeneratedRegex(@"^\s*image\s+(?<tag>[A-Za-z0-9_ ]+?)\s*=\s*[""'](?<path>[^""']+)[""']\s*(?:#.*)?$", RegexOptions.Compiled)]
     private static partial Regex ImageDefineRegex();
@@ -34,303 +30,215 @@ public sealed partial class RenPyImagePreviewService : IRenPyImagePreviewService
     [GeneratedRegex(@"^(?<tag>.+?)(?:\s+(?:with|at|as|behind|onlayer|zorder)\b.*)?$", RegexOptions.IgnoreCase | RegexOptions.Compiled)]
     private static partial Regex ClauseFilterRegex();
 
-    public async Task<RenPySceneContext> ResolveSceneContextAsync(string projectPath, string? relativeScriptPath, int line)
+    public async Task<RenPySceneContext> ResolveSceneContextAsync(RenPyImagePreviewRequest request, CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(projectPath) || string.IsNullOrWhiteSpace(relativeScriptPath) || line <= 0)
-        {
+        if (string.IsNullOrWhiteSpace(request.ProjectPath) || string.IsNullOrWhiteSpace(request.RelativeScriptPath) || request.Line <= 0)
             return new RenPySceneContext(null, null, []);
-        }
 
-        return await Task.Run(() =>
+        var index = await GetIndexAsync(request.ProjectPath, cancellationToken).ConfigureAwait(false);
+        cancellationToken.ThrowIfCancellationRequested();
+        var scriptPath = ResolveScriptPath(request.ProjectPath, request.RelativeScriptPath);
+        if (scriptPath is null || !index.Scripts.TryGetValue(scriptPath, out var script))
+            return new RenPySceneContext(null, null, []);
+
+        var state = script.Resolve(request.Line);
+        var available = new List<ImagePreviewInfo>();
+        AddPreview(state.SceneTag, "scene", "背景", available, request.ProjectPath, index);
+        foreach (var tag in state.ShowTags)
         {
-            try
-            {
-                var fullScriptPath = ResolveScriptPath(projectPath, relativeScriptPath);
-                if (!File.Exists(fullScriptPath))
-                {
-                    return new RenPySceneContext(null, null, []);
-                }
-
-                var allImageFiles = GetAllProjectImageFiles(projectPath);
-
-                var lines = File.ReadAllLines(fullScriptPath);
-                var targetLineIndex = Math.Min(line - 1, lines.Length - 1);
-
-                string? lastSceneTag = null;
-                string? lastSceneStatement = null;
-                var activeShowTags = new List<string>();
-                var imageDefinitions = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-
-                for (var i = 0; i <= targetLineIndex; i++)
-                {
-                    var currentLine = lines[i];
-                    var trimmed = currentLine.Trim();
-                    if (trimmed.Length == 0 || trimmed.StartsWith('#')) continue;
-
-                    var defMatch = ImageDefineRegex().Match(currentLine);
-                    if (defMatch.Success)
-                    {
-                        var tag = defMatch.Groups["tag"].Value.Trim();
-                        var path = defMatch.Groups["path"].Value.Trim();
-                        imageDefinitions[tag] = path;
-                        continue;
-                    }
-
-                    if (IsCommand(trimmed, "scene"))
-                    {
-                        var tag = ExtractImageTag(trimmed, "scene");
-                        lastSceneTag = tag;
-                        lastSceneStatement = trimmed;
-                        activeShowTags.Clear();
-                        continue;
-                    }
-
-                    if (IsCommand(trimmed, "show"))
-                    {
-                        var tag = ExtractImageTag(trimmed, "show");
-                        if (!string.IsNullOrWhiteSpace(tag))
-                        {
-                            var primaryTag = tag.Split(' ', '_')[0];
-                            activeShowTags.RemoveAll(x => x.Split(' ', '_')[0].Equals(primaryTag, StringComparison.OrdinalIgnoreCase));
-                            activeShowTags.Add(tag);
-                        }
-                        continue;
-                    }
-
-                    if (IsCommand(trimmed, "hide"))
-                    {
-                        var tag = ExtractImageTag(trimmed, "hide");
-                        if (!string.IsNullOrWhiteSpace(tag))
-                        {
-                            var primaryTag = tag.Split(' ', '_')[0];
-                            activeShowTags.RemoveAll(x => x.Split(' ', '_')[0].Equals(primaryTag, StringComparison.OrdinalIgnoreCase));
-                        }
-                    }
-                }
-
-                var availableImages = new List<ImagePreviewInfo>();
-
-                if (!string.IsNullOrWhiteSpace(lastSceneTag))
-                {
-                    var bgFile = FindMatchingImageFile(projectPath, lastSceneTag, imageDefinitions, allImageFiles);
-                    if (bgFile is not null)
-                    {
-                        availableImages.Add(CreatePreviewInfo($"scene {lastSceneTag}", "背景", bgFile, projectPath));
-                    }
-                }
-
-                foreach (var showTag in activeShowTags)
-                {
-                    var spriteFile = FindMatchingImageFile(projectPath, showTag, imageDefinitions, allImageFiles);
-                    if (spriteFile is not null)
-                    {
-                        availableImages.Add(CreatePreviewInfo($"show {showTag}", "立绘", spriteFile, projectPath));
-                    }
-                }
-
-                return new RenPySceneContext(lastSceneStatement, lastSceneTag, availableImages);
-            }
-            catch
-            {
-                return new RenPySceneContext(null, null, []);
-            }
-        });
+            cancellationToken.ThrowIfCancellationRequested();
+            AddPreview(tag, "show", "立绘", available, request.ProjectPath, index);
+        }
+        return new RenPySceneContext(state.SceneStatement, state.SceneTag, available);
     }
 
-    private static bool IsCommand(string line, string command)
+    public void InvalidateProject(string projectPath)
     {
-        if (!line.StartsWith(command, StringComparison.OrdinalIgnoreCase)) return false;
-        if (line.Length == command.Length) return true;
-        var nextChar = line[command.Length];
-        return char.IsWhiteSpace(nextChar) || nextChar == ':';
+        var key = NormalizeFullPath(projectPath);
+        if (_indexes.TryRemove(key, out var index)) index.Dispose();
     }
 
-    private static string? ExtractImageTag(string line, string command)
+    public void Dispose()
     {
-        var trimmed = line.Trim();
-        var commentIdx = trimmed.IndexOf('#');
-        if (commentIdx >= 0) trimmed = trimmed[..commentIdx].Trim();
-        if (trimmed.Length == 0) return null;
-
-        if (!trimmed.StartsWith(command, StringComparison.OrdinalIgnoreCase)) return null;
-        var rest = trimmed[command.Length..].Trim();
-        if (rest.Length == 0) return null;
-
-        var colonIdx = rest.IndexOf(':');
-        if (colonIdx >= 0) rest = rest[..colonIdx].Trim();
-
-        var match = ClauseFilterRegex().Match(rest);
-        if (match.Success)
-        {
-            var tag = match.Groups["tag"].Value.Trim();
-            return string.IsNullOrWhiteSpace(tag) ? null : tag;
-        }
-
-        return rest.Trim();
+        foreach (var index in _indexes.Values) index.Dispose();
+        foreach (var gate in _indexLocks.Values) gate.Dispose();
+        _indexes.Clear();
+        _indexLocks.Clear();
     }
 
-    private static List<string> GetAllProjectImageFiles(string projectPath)
+    private async Task<ProjectAssetIndex> GetIndexAsync(string projectPath, CancellationToken cancellationToken)
     {
-        if (ProjectImageCache.TryGetValue(projectPath, out var cached) &&
-            (DateTime.UtcNow - cached.ScannedAt).TotalSeconds < 10)
+        var key = NormalizeFullPath(projectPath);
+        if (_indexes.TryGetValue(key, out var current) && !current.IsDirty) return current;
+        var gate = _indexLocks.GetOrAdd(key, _ => new SemaphoreSlim(1, 1));
+        await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
         {
-            return cached.Files;
+            if (_indexes.TryGetValue(key, out current) && !current.IsDirty) return current;
+            current?.Dispose();
+            var rebuilt = await Task.Run(() => BuildIndex(key, cancellationToken), cancellationToken).ConfigureAwait(false);
+            Interlocked.Increment(ref _indexBuildCount);
+            _indexes[key] = rebuilt;
+            return rebuilt;
         }
-
-        var results = new List<string>();
-        var searchRoots = new[]
-        {
-            Path.Combine(projectPath, "game", "images"),
-            Path.Combine(projectPath, "game"),
-            Path.Combine(projectPath, "images"),
-            Path.Combine(projectPath, "game", "gui")
-        };
-
-        var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-        foreach (var root in searchRoots)
-        {
-            if (!Directory.Exists(root) || !visited.Add(root)) continue;
-
-            try
-            {
-                var files = Directory.GetFiles(root, "*.*", SearchOption.AllDirectories);
-                foreach (var file in files)
-                {
-                    var ext = Path.GetExtension(file);
-                    if (ImageExtensions.Contains(ext, StringComparer.OrdinalIgnoreCase))
-                    {
-                        results.Add(file);
-                    }
-                }
-            }
-            catch { }
-        }
-
-        ProjectImageCache[projectPath] = (DateTime.UtcNow, results);
-        return results;
+        finally { gate.Release(); }
     }
 
-    private static string? FindMatchingImageFile(string projectPath, string tag, Dictionary<string, string> imageDefinitions, List<string> allImageFiles)
+    private static ProjectAssetIndex BuildIndex(string projectPath, CancellationToken cancellationToken)
     {
-        if (imageDefinitions.TryGetValue(tag, out var definedPath))
+        var gamePath = Directory.Exists(Path.Combine(projectPath, "game")) ? Path.Combine(projectPath, "game") : projectPath;
+        var images = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var scripts = new Dictionary<string, ScriptSceneIndex>(StringComparer.OrdinalIgnoreCase);
+        var definitions = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var file in Directory.EnumerateFiles(gamePath, "*", SearchOption.AllDirectories))
         {
-            var resolved = ResolveExplicitPath(projectPath, definedPath);
-            if (resolved is not null) return resolved;
+            cancellationToken.ThrowIfCancellationRequested();
+            var fullPath = NormalizeFullPath(file);
+            var extension = Path.GetExtension(fullPath);
+            if (ImageExtensions.Contains(extension)) images.Add(fullPath);
+            else if (extension.Equals(".rpy", StringComparison.OrdinalIgnoreCase) && !IsTranslationFile(gamePath, fullPath))
+                scripts[fullPath] = ScriptSceneIndex.Parse(File.ReadAllLines(fullPath), definitions);
         }
+        return new ProjectAssetIndex(gamePath, images.Order(StringComparer.OrdinalIgnoreCase).ToArray(), scripts, definitions);
+    }
 
-        var cleanTag = tag.Trim();
-        var tagUnderscore = cleanTag.Replace(' ', '_');
-        var tagSpace = cleanTag.Replace('_', ' ');
-        var tagCompact = cleanTag.Replace(" ", "").Replace("_", "").ToLowerInvariant();
+    private static bool IsTranslationFile(string gamePath, string fullPath) =>
+        fullPath.StartsWith(Path.Combine(gamePath, "tl") + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
 
-        // 1. Exact match on filename without extension (case-insensitive)
-        foreach (var file in allImageFiles)
+    private static void AddPreview(string? tag, string command, string kind, List<ImagePreviewInfo> output, string projectPath, ProjectAssetIndex index)
+    {
+        if (string.IsNullOrWhiteSpace(tag)) return;
+        var file = FindMatchingImageFile(projectPath, tag, index);
+        if (file is not null && output.All(item => !item.FilePath.Equals(file, StringComparison.OrdinalIgnoreCase)))
+            output.Add(CreatePreviewInfo($"{command} {tag}", kind, file, projectPath));
+    }
+
+    private static string? FindMatchingImageFile(string projectPath, string tag, ProjectAssetIndex index)
+    {
+        if (index.Definitions.TryGetValue(tag, out var definedPath))
+        {
+            var explicitPath = ResolveExplicitPath(projectPath, definedPath);
+            if (explicitPath is not null && index.ImageSet.Contains(explicitPath)) return explicitPath;
+        }
+        var clean = tag.Trim();
+        var underscore = clean.Replace(' ', '_');
+        var space = clean.Replace('_', ' ');
+        var compact = Compact(clean);
+        foreach (var file in index.Images)
         {
             var name = Path.GetFileNameWithoutExtension(file);
-            if (string.Equals(name, cleanTag, StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(name, tagUnderscore, StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(name, tagSpace, StringComparison.OrdinalIgnoreCase))
-            {
-                return file;
-            }
+            if (name.Equals(clean, StringComparison.OrdinalIgnoreCase) || name.Equals(underscore, StringComparison.OrdinalIgnoreCase) ||
+                name.Equals(space, StringComparison.OrdinalIgnoreCase) || Compact(name) == compact) return file;
         }
-
-        // 2. Compact match (ignoring separators, spaces, underscores, case)
-        foreach (var file in allImageFiles)
-        {
-            var name = Path.GetFileNameWithoutExtension(file);
-            var nameCompact = name.Replace(" ", "").Replace("_", "").ToLowerInvariant();
-            if (nameCompact == tagCompact)
-            {
-                return file;
-            }
-        }
-
-        // 3. Match relative path under images folder (e.g. tag "bg room" -> "images/bg/room.png" or "images/bg_room.jpg")
-        foreach (var file in allImageFiles)
-        {
-            var relPath = file.StartsWith(projectPath, StringComparison.OrdinalIgnoreCase)
-                ? file[projectPath.Length..].Replace('\\', '/').TrimStart('/')
-                : file.Replace('\\', '/');
-
-            var relNoExt = Path.ChangeExtension(relPath, null) ?? relPath;
-            var relTokens = relNoExt.Split('/', StringSplitOptions.RemoveEmptyEntries);
-
-            var combinedRel = string.Join(" ", relTokens).Replace('_', ' ');
-            if (combinedRel.EndsWith(tagSpace, StringComparison.OrdinalIgnoreCase) ||
-                combinedRel.Contains(tagSpace, StringComparison.OrdinalIgnoreCase))
-            {
-                return file;
-            }
-        }
-
-        return null;
+        return index.Images.FirstOrDefault(file =>
+            Path.ChangeExtension(Path.GetRelativePath(projectPath, file), null)?.Replace('\\', '/').Replace('_', ' ')
+                .Contains(space, StringComparison.OrdinalIgnoreCase) == true);
     }
 
-    private static string ResolveScriptPath(string projectPath, string relativeScriptPath)
+    private static string Compact(string value) => value.Replace(" ", "", StringComparison.Ordinal).Replace("_", "", StringComparison.Ordinal).ToLowerInvariant();
+
+    private static string? ResolveScriptPath(string projectPath, string relativeScriptPath)
     {
-        var normalized = relativeScriptPath.Replace('\\', '/').TrimStart('/');
-        var direct = Path.Combine(projectPath, normalized);
+        var normalized = relativeScriptPath.Replace('/', Path.DirectorySeparatorChar).TrimStart(Path.DirectorySeparatorChar);
+        var direct = NormalizeFullPath(Path.Combine(projectPath, normalized));
         if (File.Exists(direct)) return direct;
-
-        var inGame = Path.Combine(projectPath, "game", normalized);
-        if (File.Exists(inGame)) return inGame;
-
-        return direct;
+        var inGame = NormalizeFullPath(Path.Combine(projectPath, "game", normalized));
+        return File.Exists(inGame) ? inGame : null;
     }
 
-    private static string? ResolveExplicitPath(string projectPath, string relativeOrAbsolute)
+    private static string? ResolveExplicitPath(string projectPath, string path)
     {
-        if (Path.IsPathRooted(relativeOrAbsolute) && File.Exists(relativeOrAbsolute)) return relativeOrAbsolute;
-
-        var inGame = Path.Combine(projectPath, "game", relativeOrAbsolute);
-        if (File.Exists(inGame)) return inGame;
-
-        var inImages = Path.Combine(projectPath, "game", "images", relativeOrAbsolute);
-        if (File.Exists(inImages)) return inImages;
-
-        var inRoot = Path.Combine(projectPath, relativeOrAbsolute);
-        if (File.Exists(inRoot)) return inRoot;
-
-        return null;
+        IEnumerable<string> candidates = Path.IsPathRooted(path) ? [path] :
+            [Path.Combine(projectPath, "game", path), Path.Combine(projectPath, "game", "images", path), Path.Combine(projectPath, path)];
+        return candidates.Select(NormalizeFullPath).FirstOrDefault(File.Exists);
     }
 
     private static ImagePreviewInfo CreatePreviewInfo(string tag, string kind, string filePath, string projectPath)
     {
-        var relPath = filePath.StartsWith(projectPath, StringComparison.OrdinalIgnoreCase)
-            ? filePath[projectPath.Length..].TrimStart('\\', '/')
-            : Path.GetFileName(filePath);
-
-        string resolution = string.Empty;
+        string resolution;
         try
         {
             using var stream = File.OpenRead(filePath);
-            var decoder = BitmapDecoder.Create(stream, BitmapCreateOptions.DelayCreation, BitmapCacheOption.None);
-            var frame = decoder.Frames[0];
+            var frame = BitmapDecoder.Create(stream, BitmapCreateOptions.PreservePixelFormat, BitmapCacheOption.OnLoad).Frames[0];
             resolution = $"{frame.PixelWidth} × {frame.PixelHeight}";
         }
-        catch
-        {
-            resolution = "未知分辨率";
-        }
+        catch { resolution = "未知分辨率"; }
+        var length = new FileInfo(filePath).Length;
+        var size = length switch { > 1048576 => $"{(double)length / 1048576:0.1} MB", > 1024 => $"{length / 1024} KB", _ => $"{length} B" };
+        return new ImagePreviewInfo(tag, kind, filePath, Path.GetRelativePath(projectPath, filePath), resolution, size);
+    }
 
-        string sizeText = string.Empty;
-        try
+    private static bool IsCommand(string line, string command) => line.StartsWith(command, StringComparison.OrdinalIgnoreCase) &&
+        (line.Length == command.Length || char.IsWhiteSpace(line[command.Length]) || line[command.Length] == ':');
+
+    private static string? ExtractImageTag(string line, string command)
+    {
+        var rest = line.Split('#', 2)[0].Trim()[command.Length..].Trim();
+        var colon = rest.IndexOf(':');
+        if (colon >= 0) rest = rest[..colon].Trim();
+        var match = ClauseFilterRegex().Match(rest);
+        return match.Success && !string.IsNullOrWhiteSpace(match.Groups["tag"].Value) ? match.Groups["tag"].Value.Trim() : null;
+    }
+
+    private static string NormalizeFullPath(string path) => Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+
+    private sealed class ProjectAssetIndex : IDisposable
+    {
+        private readonly FileSystemWatcher _watcher;
+        public ProjectAssetIndex(string gamePath, IReadOnlyList<string> images, IReadOnlyDictionary<string, ScriptSceneIndex> scripts, IReadOnlyDictionary<string, string> definitions)
         {
-            var length = new FileInfo(filePath).Length;
-            sizeText = length switch
+            Images = images;
+            ImageSet = images.ToHashSet(StringComparer.OrdinalIgnoreCase);
+            Scripts = scripts;
+            Definitions = definitions;
+            _watcher = new FileSystemWatcher(gamePath) { IncludeSubdirectories = true, NotifyFilter = NotifyFilters.FileName | NotifyFilters.DirectoryName | NotifyFilters.LastWrite | NotifyFilters.Size };
+            _watcher.Changed += MarkDirty; _watcher.Created += MarkDirty; _watcher.Deleted += MarkDirty; _watcher.Renamed += MarkDirty;
+            _watcher.EnableRaisingEvents = true;
+        }
+        public IReadOnlyList<string> Images { get; }
+        public HashSet<string> ImageSet { get; }
+        public IReadOnlyDictionary<string, ScriptSceneIndex> Scripts { get; }
+        public IReadOnlyDictionary<string, string> Definitions { get; }
+        public bool IsDirty { get; private set; }
+        private void MarkDirty(object sender, FileSystemEventArgs args) => IsDirty = true;
+        public void Dispose() => _watcher.Dispose();
+    }
+
+    private sealed record SceneEvent(int Line, string Command, string? Tag, string Statement);
+    private sealed record SceneState(string? SceneStatement, string? SceneTag, IReadOnlyList<string> ShowTags);
+
+    private sealed class ScriptSceneIndex
+    {
+        private readonly IReadOnlyList<SceneEvent> _events;
+        private ScriptSceneIndex(IReadOnlyList<SceneEvent> events) => _events = events;
+        public static ScriptSceneIndex Parse(IReadOnlyList<string> lines, IDictionary<string, string> definitions)
+        {
+            var events = new List<SceneEvent>();
+            for (var index = 0; index < lines.Count; index++)
             {
-                > 1024 * 1024 => $"{(double)length / (1024 * 1024):0.1} MB",
-                > 1024 => $"{length / 1024} KB",
-                _ => $"{length} B"
-            };
+                var line = lines[index]; var trimmed = line.Trim();
+                if (trimmed.Length == 0 || trimmed.StartsWith('#')) continue;
+                var definition = ImageDefineRegex().Match(line);
+                if (definition.Success) { definitions[definition.Groups["tag"].Value.Trim()] = definition.Groups["path"].Value.Trim(); continue; }
+                foreach (var command in new[] { "scene", "show", "hide" })
+                    if (IsCommand(trimmed, command)) { events.Add(new SceneEvent(index + 1, command, ExtractImageTag(trimmed, command), trimmed)); break; }
+            }
+            return new ScriptSceneIndex(events);
         }
-        catch
+        public SceneState Resolve(int line)
         {
-            sizeText = string.Empty;
+            string? scene = null; string? sceneTag = null; var shows = new List<string>();
+            foreach (var item in _events.TakeWhile(item => item.Line <= line))
+            {
+                if (item.Command == "scene") { scene = item.Statement; sceneTag = item.Tag; shows.Clear(); }
+                else if (item.Tag is not null)
+                {
+                    var primary = item.Tag.Split(' ', '_')[0];
+                    shows.RemoveAll(tag => tag.Split(' ', '_')[0].Equals(primary, StringComparison.OrdinalIgnoreCase));
+                    if (item.Command == "show") shows.Add(item.Tag);
+                }
+            }
+            return new SceneState(scene, sceneTag, shows);
         }
-
-        return new ImagePreviewInfo(tag, kind, filePath, relPath, resolution, sizeText);
     }
 }

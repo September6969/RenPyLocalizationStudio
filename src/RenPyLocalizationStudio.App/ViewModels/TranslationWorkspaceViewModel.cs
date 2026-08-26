@@ -258,6 +258,8 @@ public sealed class TranslationWorkspaceViewModel : WorkspaceViewModelBase
     private object? _anchorItem;
     private ScrollAnchor? _scrollAnchor;
     private IReadOnlyList<ContentItem> _coverageItems = [];
+    private CancellationTokenSource? _previewCancellation;
+    private long _previewVersion;
 
     public TranslationWorkspaceViewModel(ProjectSessionViewModel session, IRenPyImagePreviewService? imagePreviewService = null)
         : base("translation", "翻译", "\uE8A5")
@@ -274,7 +276,11 @@ public sealed class TranslationWorkspaceViewModel : WorkspaceViewModelBase
         MoveNextCommand = new RelayCommand(() => MoveEditable(1));
         ClearSearchCommand = new RelayCommand(() => SearchText = string.Empty, () => SearchText.Length > 0);
         Inspector.TranslationChanged += (_, _) => UpdateSelectedPresentation();
-        session.SnapshotChanged += (_, _) => RefreshFromSnapshot();
+        session.SnapshotChanged += (_, _) =>
+        {
+            if (!string.IsNullOrWhiteSpace(session.ProjectPath)) _imagePreviewService.InvalidateProject(session.ProjectPath);
+            RefreshFromSnapshot();
+        };
     }
 
     public TranslationSidebarViewModel Sidebar { get; }
@@ -330,7 +336,7 @@ public sealed class TranslationWorkspaceViewModel : WorkspaceViewModelBase
         {
             if (!SetProperty(ref _selectedItem, value)) return;
             UpdateInspector(value);
-            _ = UpdateImagePreviewAsync(value);
+            StartImagePreviewUpdate(value);
             if (value is not null) ScrollAnchor = new ScrollAnchor(value.Key, FallbackIndex: VisibleItems.IndexOf(value));
         }
     }
@@ -547,7 +553,16 @@ public sealed class TranslationWorkspaceViewModel : WorkspaceViewModelBase
         OnPropertyChanged(nameof(ViewTitle));
     }
 
-    private async Task UpdateImagePreviewAsync(ContentItem? item)
+    private void StartImagePreviewUpdate(ContentItem? item)
+    {
+        _previewCancellation?.Cancel();
+        _previewCancellation?.Dispose();
+        _previewCancellation = new CancellationTokenSource();
+        var version = Interlocked.Increment(ref _previewVersion);
+        _ = UpdateImagePreviewAsync(item, version, _previewCancellation.Token);
+    }
+
+    private async Task UpdateImagePreviewAsync(ContentItem? item, long version, CancellationToken cancellationToken)
     {
         var node = item?.Node ?? item?.Unit?.BoundNode;
         var relativePath = node?.Region.RelativePath ?? item?.Unit?.SourcePath;
@@ -559,7 +574,22 @@ public sealed class TranslationWorkspaceViewModel : WorkspaceViewModelBase
             return;
         }
 
-        var context = await _imagePreviewService.ResolveSceneContextAsync(_session.ProjectPath, relativePath, line);
-        ImagePreview.UpdateContext(context);
+        try
+        {
+            var context = await _imagePreviewService.ResolveSceneContextAsync(
+                new RenPyImagePreviewRequest(_session.ProjectPath, relativePath, line, item?.Key),
+                cancellationToken);
+            if (version == Volatile.Read(ref _previewVersion) && ReferenceEquals(item, SelectedItem))
+                ImagePreview.UpdateContext(context);
+        }
+        catch (OperationCanceledException)
+        {
+            // 快速切换节点时取消旧请求属于正常路径。
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException)
+        {
+            if (version == Volatile.Read(ref _previewVersion))
+                _session.Tasks.StatusMessage = $"图片预览不可用：{exception.Message}";
+        }
     }
 }
