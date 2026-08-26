@@ -18,7 +18,6 @@ public sealed class ImagePreviewViewModel : ObservableObject
     private ImagePreviewInfo? _selectedImage;
     private BitmapImage? _currentBitmap;
     private bool _hasImages;
-    private bool _isLoading;
     private string _sceneTag = string.Empty;
     private string _statusHint = "选择包含 scene 或 show 的对白行即可自动预览画面";
     private bool _isCollapsed;
@@ -50,7 +49,6 @@ public sealed class ImagePreviewViewModel : ObservableObject
     }
 
     public bool HasImages { get => _hasImages; private set => SetProperty(ref _hasImages, value); }
-    public bool IsLoading { get => _isLoading; private set => SetProperty(ref _isLoading, value); }
     public string SceneTag { get => _sceneTag; private set => SetProperty(ref _sceneTag, value); }
     public string StatusHint { get => _statusHint; private set => SetProperty(ref _statusHint, value); }
     public bool IsCollapsed { get => _isCollapsed; set => SetProperty(ref _isCollapsed, value); }
@@ -242,14 +240,16 @@ public sealed class TranslationInspectorViewModel : WorkspaceInspectorViewModelB
         _target?.SharedString?.Unify(TranslationText);
         OnPropertyChanged(nameof(HasConflict));
         UnifyConflictCommand.NotifyCanExecuteChanged();
+        TranslationChanged?.Invoke(this, EventArgs.Empty);
         _tasks.StatusMessage = "已在内存中统一冲突译文，保存后写入全部物理定义。";
     }
 }
 
-public sealed class TranslationWorkspaceViewModel : WorkspaceViewModelBase
+public sealed class TranslationWorkspaceViewModel : WorkspaceViewModelBase, IDisposable
 {
     private readonly ProjectSessionViewModel _session;
     private readonly IRenPyImagePreviewService _imagePreviewService;
+    private readonly bool _ownsImagePreviewService;
     private TranslationViewMode _viewMode;
     private FlowGroupingMode _groupingMode;
     private string _searchText = string.Empty;
@@ -258,6 +258,8 @@ public sealed class TranslationWorkspaceViewModel : WorkspaceViewModelBase
     private object? _anchorItem;
     private ScrollAnchor? _scrollAnchor;
     private IReadOnlyList<ContentItem> _coverageItems = [];
+    private readonly Dictionary<ContentItem, bool> _completionStates = new(ReferenceEqualityComparer.Instance);
+    private readonly Dictionary<SharedStringEntry, List<ContentItem>> _sharedPresentationItems = new(ReferenceEqualityComparer.Instance);
     private CancellationTokenSource? _previewCancellation;
     private long _previewVersion;
 
@@ -266,6 +268,7 @@ public sealed class TranslationWorkspaceViewModel : WorkspaceViewModelBase
     {
         _session = session;
         _imagePreviewService = imagePreviewService ?? new RenPyImagePreviewService();
+        _ownsImagePreviewService = imagePreviewService is null;
         Sidebar = new TranslationSidebarViewModel(this);
         Main = new TranslationMainContentViewModel(this);
         Inspector = new TranslationInspectorViewModel(session.Tasks);
@@ -275,12 +278,8 @@ public sealed class TranslationWorkspaceViewModel : WorkspaceViewModelBase
         MovePreviousCommand = new RelayCommand(() => MoveEditable(-1));
         MoveNextCommand = new RelayCommand(() => MoveEditable(1));
         ClearSearchCommand = new RelayCommand(() => SearchText = string.Empty, () => SearchText.Length > 0);
-        Inspector.TranslationChanged += (_, _) => UpdateSelectedPresentation();
-        session.SnapshotChanged += (_, _) =>
-        {
-            if (!string.IsNullOrWhiteSpace(session.ProjectPath)) _imagePreviewService.InvalidateProject(session.ProjectPath);
-            RefreshFromSnapshot();
-        };
+        Inspector.TranslationChanged += OnTranslationChanged;
+        session.SnapshotChanged += OnSnapshotChanged;
     }
 
     public TranslationSidebarViewModel Sidebar { get; }
@@ -303,7 +302,7 @@ public sealed class TranslationWorkspaceViewModel : WorkspaceViewModelBase
     public TranslationViewMode ViewMode
     {
         get => _viewMode;
-        set { if (SetProperty(ref _viewMode, value)) RebuildVisibleItems(); }
+        set { if (SetProperty(ref _viewMode, value)) RebuildProjection(); }
     }
 
     public FlowGroupingMode GroupingMode
@@ -312,7 +311,7 @@ public sealed class TranslationWorkspaceViewModel : WorkspaceViewModelBase
         set
         {
             if (!SetProperty(ref _groupingMode, value)) return;
-            RebuildVisibleItems();
+            RebuildProjection();
             RebuildNavigation();
             OnPropertyChanged(nameof(NavigationHeading));
         }
@@ -325,7 +324,7 @@ public sealed class TranslationWorkspaceViewModel : WorkspaceViewModelBase
         {
             if (!SetProperty(ref _searchText, value)) return;
             ClearSearchCommand.NotifyCanExecuteChanged();
-            RebuildVisibleItems();
+            ApplySearchFilter();
         }
     }
 
@@ -368,6 +367,24 @@ public sealed class TranslationWorkspaceViewModel : WorkspaceViewModelBase
         return Task.CompletedTask;
     }
 
+    public void Dispose()
+    {
+        Inspector.TranslationChanged -= OnTranslationChanged;
+        _session.SnapshotChanged -= OnSnapshotChanged;
+        _previewCancellation?.Cancel();
+        _previewCancellation?.Dispose();
+        _previewCancellation = null;
+        if (_ownsImagePreviewService && _imagePreviewService is IDisposable disposable) disposable.Dispose();
+    }
+
+    private void OnTranslationChanged(object? sender, EventArgs args) => UpdateSelectedPresentation();
+
+    private void OnSnapshotChanged(object? sender, ProjectSnapshot? snapshot)
+    {
+        if (!string.IsNullOrWhiteSpace(_session.ProjectPath)) _imagePreviewService.InvalidateProject(_session.ProjectPath);
+        RefreshFromSnapshot();
+    }
+
     public bool Navigate(NavigateToSourceRequest request)
     {
         var snapshot = _session.Snapshot;
@@ -400,20 +417,20 @@ public sealed class TranslationWorkspaceViewModel : WorkspaceViewModelBase
     {
         var selectedId = SelectedItem?.Key ?? ScrollAnchor?.ItemId;
         RebuildNavigation();
-        RebuildVisibleItems(selectedId);
+        RebuildProjection(selectedId);
         Badge = _session.Snapshot is null ? null : _session.Snapshot.TranslationUnits.Count(x => string.IsNullOrWhiteSpace(x.TranslationText)).ToString();
     }
 
-    private void RebuildVisibleItems(string? preferredId = null)
+    private void RebuildProjection(string? preferredId = null)
     {
         preferredId ??= SelectedItem?.Key ?? ScrollAnchor?.ItemId;
-        VisibleItems.Clear();
         var snapshot = _session.Snapshot;
         if (snapshot is null)
         {
             _coverageItems = [];
+            _sharedPresentationItems.Clear();
             RecalculateCoverage();
-            NotifyCollectionPresentation();
+            ApplySearchFilter(preferredId);
             return;
         }
 
@@ -424,13 +441,37 @@ public sealed class TranslationWorkspaceViewModel : WorkspaceViewModelBase
             _ => BuildFlowItems(snapshot, GroupingMode)
         }).ToList();
         _coverageItems = projectedItems;
+        RebuildSharedPresentationIndex();
         RecalculateCoverage();
-        IEnumerable<ContentItem> items = projectedItems;
-        if (SearchText.Trim().Length > 0) items = items.Where(x => x.SearchText.Contains(SearchText.Trim(), StringComparison.OrdinalIgnoreCase));
+        ApplySearchFilter(preferredId);
+    }
+
+    private void ApplySearchFilter(string? preferredId = null)
+    {
+        preferredId ??= SelectedItem?.Key ?? ScrollAnchor?.ItemId;
+        VisibleItems.Clear();
+        IEnumerable<ContentItem> items = _coverageItems;
+        var search = SearchText.Trim();
+        if (search.Length > 0) items = items.Where(x => x.SearchText.Contains(search, StringComparison.OrdinalIgnoreCase));
         foreach (var item in items) VisibleItems.Add(item);
         SelectedItem = preferredId is null ? null : VisibleItems.FirstOrDefault(x => x.Key == preferredId);
         if (SelectedItem is not null) AnchorItem = SelectedItem;
         NotifyCollectionPresentation();
+    }
+
+    private void RebuildSharedPresentationIndex()
+    {
+        _sharedPresentationItems.Clear();
+        foreach (var item in _coverageItems)
+        {
+            if (item.SharedString is null) continue;
+            if (!_sharedPresentationItems.TryGetValue(item.SharedString, out var presentations))
+            {
+                presentations = [];
+                _sharedPresentationItems[item.SharedString] = presentations;
+            }
+            presentations.Add(item);
+        }
     }
 
     private static IEnumerable<ContentItem> BuildFlowItems(ProjectSnapshot snapshot, FlowGroupingMode groupingMode)
@@ -522,24 +563,50 @@ public sealed class TranslationWorkspaceViewModel : WorkspaceViewModelBase
     {
         var item = SelectedItem;
         if (item is null) return;
+        IReadOnlyList<ContentItem> affectedItems = [item];
         if (item.SharedString is not null)
         {
-            foreach (var candidate in _coverageItems.Where(x => ReferenceEquals(x.SharedString, item.SharedString)))
+            if (_sharedPresentationItems.TryGetValue(item.SharedString, out var presentations)) affectedItems = presentations;
+            foreach (var candidate in affectedItems)
             {
                 candidate.Subtitle = item.SharedString.Translation;
                 candidate.RefreshStatus();
             }
         }
         else item.RefreshStatus();
-        RecalculateCoverage();
+
+        var translatedDelta = 0;
+        foreach (var candidate in affectedItems)
+        {
+            var wasComplete = _completionStates.GetValueOrDefault(candidate);
+            var isComplete = candidate.IsTranslationComplete;
+            if (wasComplete != isComplete) translatedDelta += isComplete ? 1 : -1;
+            _completionStates[candidate] = isComplete;
+        }
+        if (translatedDelta == 0) return;
+        TranslatedCount += translatedDelta;
+        PublishCoverage();
     }
 
     private void RecalculateCoverage()
     {
-        var coverage = TranslationCoverageCalculator.Calculate(_coverageItems);
-        EditableCount = coverage.EditableCount;
-        TranslatedCount = coverage.TranslatedCount;
-        CoveragePercent = coverage.Percentage;
+        _completionStates.Clear();
+        EditableCount = 0;
+        TranslatedCount = 0;
+        foreach (var item in _coverageItems)
+        {
+            if (!item.IsEditable) continue;
+            EditableCount++;
+            var isComplete = item.IsTranslationComplete;
+            _completionStates[item] = isComplete;
+            if (isComplete) TranslatedCount++;
+        }
+        PublishCoverage();
+    }
+
+    private void PublishCoverage()
+    {
+        CoveragePercent = EditableCount == 0 ? 0 : TranslatedCount * 100d / EditableCount;
         OnPropertyChanged(nameof(EditableCount));
         OnPropertyChanged(nameof(TranslatedCount));
         OnPropertyChanged(nameof(CoveragePercent));

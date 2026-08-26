@@ -13,6 +13,8 @@ public partial class MainWindow : Window
     private const int HtMaxButton = 9;
     private readonly MainViewModel _viewModel;
     private HwndSource? _source;
+    private bool? _sidebarExpanded;
+    private bool? _inspectorExpanded;
 
     public MainWindow(MainViewModel viewModel)
     {
@@ -21,13 +23,13 @@ public partial class MainWindow : Window
         DataContext = viewModel;
         Loaded += OnLoaded;
         SourceInitialized += OnSourceInitialized;
-        _viewModel.PropertyChanged += (_, args) =>
-        {
-            if (args.PropertyName == nameof(MainViewModel.CurrentWorkspace))
-            {
-                OnWorkspaceChanged();
-            }
-        };
+        _viewModel.PropertyChanged += OnViewModelPropertyChanged;
+    }
+
+    private void OnViewModelPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs args)
+    {
+        if (args.PropertyName == nameof(MainViewModel.CurrentWorkspace))
+            OnWorkspaceChanged();
     }
 
     private void OnWorkspaceChanged()
@@ -39,6 +41,8 @@ public partial class MainWindow : Window
             AnimateSlideIn(InspectorHost, fromX: 16, fromY: 0);
     }
 
+    private static readonly System.Windows.Media.Animation.CubicEase SharedEaseOut = new() { EasingMode = System.Windows.Media.Animation.EasingMode.EaseOut };
+
     private static void AnimateSlideIn(FrameworkElement element, double fromX = 0, double fromY = 0, double durationMs = 180)
     {
         if (element == null) return;
@@ -46,18 +50,17 @@ public partial class MainWindow : Window
         element.RenderTransform = tt;
         element.Opacity = 0;
 
-        var ease = new System.Windows.Media.Animation.CubicEase { EasingMode = System.Windows.Media.Animation.EasingMode.EaseOut };
-        var fadeAnim = new System.Windows.Media.Animation.DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(durationMs)) { EasingFunction = ease };
+        var fadeAnim = new System.Windows.Media.Animation.DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(durationMs)) { EasingFunction = SharedEaseOut };
         element.BeginAnimation(UIElement.OpacityProperty, fadeAnim);
 
         if (fromX != 0)
         {
-            var slideAnim = new System.Windows.Media.Animation.DoubleAnimation(fromX, 0, TimeSpan.FromMilliseconds(durationMs)) { EasingFunction = ease };
+            var slideAnim = new System.Windows.Media.Animation.DoubleAnimation(fromX, 0, TimeSpan.FromMilliseconds(durationMs)) { EasingFunction = SharedEaseOut };
             tt.BeginAnimation(System.Windows.Media.TranslateTransform.XProperty, slideAnim);
         }
         if (fromY != 0)
         {
-            var slideAnim = new System.Windows.Media.Animation.DoubleAnimation(fromY, 0, TimeSpan.FromMilliseconds(durationMs)) { EasingFunction = ease };
+            var slideAnim = new System.Windows.Media.Animation.DoubleAnimation(fromY, 0, TimeSpan.FromMilliseconds(durationMs)) { EasingFunction = SharedEaseOut };
             tt.BeginAnimation(System.Windows.Media.TranslateTransform.YProperty, slideAnim);
         }
     }
@@ -77,14 +80,18 @@ public partial class MainWindow : Window
             return;
         }
 
-        double targetY = index * 50 + 2;
+        var container = ActivityBarList.ItemContainerGenerator.ContainerFromIndex(index) as FrameworkElement;
+        var targetY = container is null
+            ? index * 50d + 2d
+            : container.TranslatePoint(new Point(0, 0), ActivityBarList).Y +
+              Math.Max(0, (container.ActualHeight - ActivitySelectionIndicator.Height) / 2d);
 
         if (ActivitySelectionIndicator.Opacity == 0)
         {
             IndicatorTransform.Y = targetY;
             var fadeAnim = new System.Windows.Media.Animation.DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(180))
             {
-                EasingFunction = new System.Windows.Media.Animation.CubicEase { EasingMode = System.Windows.Media.Animation.EasingMode.EaseOut }
+                EasingFunction = SharedEaseOut
             };
             ActivitySelectionIndicator.BeginAnimation(UIElement.OpacityProperty, fadeAnim);
             return;
@@ -96,7 +103,7 @@ public partial class MainWindow : Window
         {
             var anim = new System.Windows.Media.Animation.DoubleAnimation(targetY, TimeSpan.FromMilliseconds(200))
             {
-                EasingFunction = new System.Windows.Media.Animation.CubicEase { EasingMode = System.Windows.Media.Animation.EasingMode.EaseOut }
+                EasingFunction = SharedEaseOut
             };
             IndicatorTransform.BeginAnimation(System.Windows.Media.TranslateTransform.YProperty, anim);
         }
@@ -109,8 +116,17 @@ public partial class MainWindow : Window
 
     private async void OnLoaded(object sender, RoutedEventArgs e)
     {
-        await _viewModel.InitializeAsync();
-        UpdateActivityIndicator(animate: false);
+        try
+        {
+            await _viewModel.InitializeAsync();
+            UpdateActivityIndicator(animate: false);
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[MainWindow] InitializeAsync failed: {ex}");
+            _viewModel.Tasks.StatusMessage = $"初始化失败：{ex.Message}";
+            _viewModel.Tasks.Logs.Add(new ToolLogEntry(_viewModel.Tasks.StatusMessage, "Error"));
+        }
     }
 
     private void OnSourceInitialized(object? sender, EventArgs e)
@@ -144,6 +160,8 @@ public partial class MainWindow : Window
 
     private void OnWindowClosed(object? sender, EventArgs e)
     {
+        _viewModel.PropertyChanged -= OnViewModelPropertyChanged;
+        _viewModel.Dispose();
         _source?.RemoveHook(WindowMessageHook);
         _source = null;
     }
@@ -158,15 +176,17 @@ public partial class MainWindow : Window
         double targetSidebarWidth = showSidebar ? 260 : 0;
         double targetInspectorWidth = showInspector ? 360 : 0;
 
-        if (IsLoaded)
+        if (_sidebarExpanded != showSidebar)
         {
-            AnimateWidth(SidebarHost, targetSidebarWidth);
-            AnimateWidth(InspectorHost, targetInspectorWidth);
+            _sidebarExpanded = showSidebar;
+            if (IsLoaded) AnimateWidth(SidebarHost, targetSidebarWidth);
+            else SidebarHost.Width = targetSidebarWidth;
         }
-        else
+        if (_inspectorExpanded != showInspector)
         {
-            SidebarHost.Width = targetSidebarWidth;
-            InspectorHost.Width = targetInspectorWidth;
+            _inspectorExpanded = showInspector;
+            if (IsLoaded) AnimateWidth(InspectorHost, targetInspectorWidth);
+            else InspectorHost.Width = targetInspectorWidth;
         }
 
         SidebarDividerColumn.Width = showSidebar ? new GridLength(1) : new GridLength(0);
@@ -180,7 +200,7 @@ public partial class MainWindow : Window
     {
         var anim = new System.Windows.Media.Animation.DoubleAnimation(targetWidth, TimeSpan.FromMilliseconds(durationMs))
         {
-            EasingFunction = new System.Windows.Media.Animation.CubicEase { EasingMode = System.Windows.Media.Animation.EasingMode.EaseOut }
+            EasingFunction = SharedEaseOut
         };
         element.BeginAnimation(FrameworkElement.WidthProperty, anim);
     }

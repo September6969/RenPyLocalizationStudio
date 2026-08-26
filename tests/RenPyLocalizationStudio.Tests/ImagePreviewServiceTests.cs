@@ -19,6 +19,7 @@ public sealed class ImagePreviewServiceTests
 
         Assert.Equal(2, first.AvailableImages.Count);
         Assert.Equal(2, first.AvailableImages.Select(item => item.FilePath).Distinct(StringComparer.OrdinalIgnoreCase).Count());
+        Assert.All(first.AvailableImages, item => Assert.Equal("1 × 1", item.Resolution));
         Assert.Equal(first.SceneStatement, second.SceneStatement);
         Assert.Equal(first.AvailableImages.Select(item => item.FilePath), second.AvailableImages.Select(item => item.FilePath));
         Assert.Equal(1, service.IndexBuildCount);

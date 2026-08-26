@@ -5,7 +5,8 @@
         <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
         <TextBlock Text="{Binding Title}" FontSize="15" FontWeight="SemiBold" />
         <TextBlock Grid.Row="1" Text="{Binding Subtitle}" Margin="0,4,0,14" FontSize="11" Foreground="{DynamicResource TextMutedBrush}" TextWrapping="Wrap" />
-        <TextBox Grid.Row="2" Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,0,10" ToolTip="筛选当前工作区" />
+        <TextBox Grid.Row="2" Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,0,10" ToolTip="筛选当前工作区"
+                 AutomationProperties.Name="筛选当前工作区" />
         <ListBox Grid.Row="3" ItemsSource="{Binding Items}" SelectedItem="{Binding SelectedItem}" Background="Transparent" BorderThickness="0"
                  ItemContainerStyle="{StaticResource FlatListItemStyle}">
             <ListBox.ItemTemplate>

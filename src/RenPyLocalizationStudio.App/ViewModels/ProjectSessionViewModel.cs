@@ -22,6 +22,7 @@ public sealed class ProjectSessionViewModel : ObservableObject
     private string _language = string.Empty;
     private string _sdkPath = string.Empty;
     private ProjectSnapshot? _snapshot;
+    private long _languageRequestVersion;
 
     public ProjectSessionViewModel(
         IProjectAnalysisService analysisService,
@@ -117,17 +118,21 @@ public sealed class ProjectSessionViewModel : ObservableObject
 
     public async Task LoadLanguagesAsync(string? preferredLanguage = null, CancellationToken cancellationToken = default)
     {
-        Languages.Clear();
+        var requestVersion = Interlocked.Increment(ref _languageRequestVersion);
+        var projectPath = ProjectPath;
         var result = await _catalogService.ExecuteAsync(
-            new ProjectLanguageDiscoveryRequest(ProjectPath),
+            new ProjectLanguageDiscoveryRequest(projectPath),
             Tasks.CreateProgress(),
             cancellationToken);
+        if (requestVersion != Volatile.Read(ref _languageRequestVersion) ||
+            !string.Equals(projectPath, ProjectPath, StringComparison.OrdinalIgnoreCase)) return;
         if (!result.IsSuccess || result.Value is null)
         {
             Tasks.StatusMessage = result.Diagnostics.FirstOrDefault()?.Message ?? "语言发现失败。";
             return;
         }
 
+        Languages.Clear();
         foreach (var language in result.Value) Languages.Add(language);
         Language = preferredLanguage is not null && Languages.Contains(preferredLanguage)
             ? preferredLanguage

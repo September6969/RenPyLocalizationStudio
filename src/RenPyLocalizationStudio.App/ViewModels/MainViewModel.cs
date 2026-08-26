@@ -7,10 +7,12 @@ using RenPyLocalizationStudio.App.Services;
 
 namespace RenPyLocalizationStudio.App.ViewModels;
 
-public sealed class MainViewModel : ObservableObject, IRecipient<NavigateToSourceRequestMessage>
+public sealed class MainViewModel : ObservableObject, IRecipient<NavigateToSourceRequestMessage>, IDisposable
 {
     private readonly IThemeService _theme;
     private readonly WorkspaceTaskCoordinator _taskCoordinator;
+    private readonly IMessenger _messenger;
+    private bool _disposed;
     private WorkspaceViewModelBase? _currentWorkspace;
     private string _accentColor;
     private Brush _accentPreviewBrush;
@@ -32,6 +34,7 @@ public sealed class MainViewModel : ObservableObject, IRecipient<NavigateToSourc
         Tasks = tasks;
         _theme = theme;
         _taskCoordinator = taskCoordinator;
+        _messenger = messenger;
         TranslationWorkspace = translation;
         Workspaces = [translation, tl, extra, patch, archive, diagnostics];
         _currentWorkspace = translation;
@@ -41,10 +44,7 @@ public sealed class MainViewModel : ObservableObject, IRecipient<NavigateToSourc
         MovePreviousTranslationCommand = translation.MovePreviousCommand;
         MoveNextTranslationCommand = translation.MoveNextCommand;
         messenger.Register(this);
-        session.PropertyChanged += (_, args) =>
-        {
-            if (args.PropertyName == nameof(ProjectSessionViewModel.ProjectName)) OnPropertyChanged(nameof(WindowTitle));
-        };
+        session.PropertyChanged += OnSessionPropertyChanged;
     }
 
     public ProjectSessionViewModel Session { get; }
@@ -92,6 +92,21 @@ public sealed class MainViewModel : ObservableObject, IRecipient<NavigateToSourc
         if (!TranslationWorkspace.Navigate(message.Value)) Tasks.StatusMessage = "未能在当前剧情流中定位该诊断来源。";
     }
 
+    public void Dispose()
+    {
+        if (_disposed) return;
+        _disposed = true;
+        Session.PropertyChanged -= OnSessionPropertyChanged;
+        _messenger.UnregisterAll(this);
+        TranslationWorkspace.Dispose();
+        _taskCoordinator.Dispose();
+    }
+
+    private void OnSessionPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs args)
+    {
+        if (args.PropertyName == nameof(ProjectSessionViewModel.ProjectName)) OnPropertyChanged(nameof(WindowTitle));
+    }
+
     private static async Task ChangeWorkspaceAsync(WorkspaceViewModelBase? previous, WorkspaceViewModelBase current, CancellationToken cancellationToken)
     {
         if (previous is not null) await previous.DeactivateAsync(cancellationToken);
@@ -117,17 +132,10 @@ public sealed class MainViewModel : ObservableObject, IRecipient<NavigateToSourc
     private static bool TryCreateAccentBrush(string? color, out Brush brush)
     {
         brush = Brushes.Transparent;
-        try
-        {
-            if (ColorConverter.ConvertFromString(color) is not Color parsed) return false;
-            var result = new SolidColorBrush(parsed);
-            result.Freeze();
-            brush = result;
-            return true;
-        }
-        catch (FormatException)
-        {
-            return false;
-        }
+        if (!ThemeService.TryParseAccentColor(color, out var parsed)) return false;
+        var result = new SolidColorBrush(parsed);
+        result.Freeze();
+        brush = result;
+        return true;
     }
 }

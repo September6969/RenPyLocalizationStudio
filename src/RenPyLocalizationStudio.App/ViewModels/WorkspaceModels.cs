@@ -58,9 +58,31 @@ public static class TranslationCoverageCalculator
 {
     public static TranslationCoverage Calculate(IEnumerable<ContentItem> items)
     {
-        var editable = items.Where(x => x.IsEditable).ToArray();
-        var translated = editable.Count(x => x.IsTranslationComplete);
-        return new TranslationCoverage(translated, editable.Length, editable.Length == 0 ? 0 : translated * 100d / editable.Length);
+        var editable = 0;
+        var translated = 0;
+        foreach (var item in items)
+        {
+            if (!item.IsEditable) continue;
+            editable++;
+            if (item.IsTranslationComplete) translated++;
+        }
+        return new TranslationCoverage(translated, editable, editable == 0 ? 0 : translated * 100d / editable);
+    }
+}
+
+internal static class DiagnosticPresentationFilter
+{
+    public static IEnumerable<ContentItem> Apply(IEnumerable<ContentItem> items, string? severityId, string? searchText)
+    {
+        var query = items;
+        if (!string.IsNullOrWhiteSpace(severityId) && !severityId.Equals("all", StringComparison.OrdinalIgnoreCase) &&
+            Enum.TryParse<DiagnosticSeverity>(severityId, out var severity))
+            query = query.Where(x => x.Diagnostic?.Severity == severity);
+
+        var search = searchText?.Trim() ?? string.Empty;
+        if (search.Length > 0)
+            query = query.Where(x => x.SearchText.Contains(search, StringComparison.OrdinalIgnoreCase));
+        return query;
     }
 }
 
@@ -83,7 +105,8 @@ public sealed class ContentItem : ObservableObject
     public bool IsStatusVisible { get => _isStatusVisible; private set => SetProperty(ref _isStatusVisible, value); }
     public required Brush Accent { get; init; }
     public required Thickness IndentMargin { get; init; }
-    public required string SearchText { get; init; }
+    public required string SearchTextBase { get; init; }
+    public string SearchText => $"{SearchTextBase} {Subtitle} {SharedString?.Translation} {Unit?.TranslationText} {Unit?.RawBodyText}";
     public TranslationUnit? Unit { get; init; }
     public SharedStringEntry? SharedString { get; init; }
     public FlowNode? Node { get; init; }
@@ -114,7 +137,7 @@ public sealed class ContentItem : ObservableObject
             _ => Color.FromRgb(139, 148, 158)
         }),
         IndentMargin = new Thickness(Math.Min(depth, 8) * 14, 0, 0, 0),
-        SearchText = $"{node.DisplayText} {node.Region.RelativePath} {sharedString?.Translation ?? unit?.TranslationText}",
+        SearchTextBase = $"{node.DisplayText} {node.Region.RelativePath}",
         Unit = unit,
         SharedString = sharedString,
         Node = node
@@ -129,7 +152,7 @@ public sealed class ContentItem : ObservableObject
         Subtitle = mode == FlowGroupingMode.SourceFile ? "源文件" : "Label 分组",
         Accent = Brush(Color.FromRgb(209, 107, 165)),
         IndentMargin = new Thickness(0),
-        SearchText = title
+        SearchTextBase = title
     }.WithCurrentStatus();
 
     public static ContentItem FromSharedString(SharedStringEntry entry) => new ContentItem()
@@ -141,7 +164,7 @@ public sealed class ContentItem : ObservableObject
         Subtitle = entry.Translation,
         Accent = Brush(entry.HasConflict ? Color.FromRgb(248, 81, 73) : Color.FromRgb(126, 105, 230)),
         IndentMargin = new Thickness(0),
-        SearchText = $"{entry.OldText} {entry.Translation} {string.Join(' ', entry.References.Select(x => x.SourcePath))}",
+        SearchTextBase = $"{entry.OldText} {string.Join(' ', entry.References.Select(x => x.SourcePath))}",
         SharedString = entry
     }.WithCurrentStatus();
 
@@ -154,7 +177,7 @@ public sealed class ContentItem : ObservableObject
         Subtitle = $"{unit.RelativeTlPath}:{unit.HeaderLine}",
         Accent = Brush(Color.FromRgb(224, 143, 68)),
         IndentMargin = new Thickness(0),
-        SearchText = $"{unit.Identifier} {unit.OldText} {unit.TranslationText} {unit.RelativeTlPath}",
+        SearchTextBase = $"{unit.Identifier} {unit.OldText} {unit.RelativeTlPath}",
         Unit = unit
     }.WithCurrentStatus();
 
@@ -173,7 +196,7 @@ public sealed class ContentItem : ObservableObject
             _ => Color.FromRgb(88, 166, 255)
         }),
         IndentMargin = new Thickness(0),
-        SearchText = $"{diagnostic.Code} {diagnostic.Message} {diagnostic.RelativePath}",
+        SearchTextBase = $"{diagnostic.Code} {diagnostic.Message} {diagnostic.RelativePath}",
         Diagnostic = diagnostic
     }.WithCurrentStatus();
 
@@ -187,7 +210,7 @@ public sealed class ContentItem : ObservableObject
         Badge = candidate.AlreadyTranslated ? "已存在" : candidate.Confidence switch { CandidateConfidence.High => "高置信", CandidateConfidence.Medium => "待确认", _ => "低置信" },
         Accent = Brush(candidate.AlreadyTranslated ? Color.FromRgb(75, 85, 99) : Color.FromRgb(209, 107, 165)),
         IndentMargin = new Thickness(0),
-        SearchText = $"{candidate.Text} {candidate.RelativePath} {candidate.Kind} {candidate.Reason}",
+        SearchTextBase = $"{candidate.Text} {candidate.RelativePath} {candidate.Kind} {candidate.Reason}",
         ExtraText = candidate
     }.WithCurrentStatus();
 

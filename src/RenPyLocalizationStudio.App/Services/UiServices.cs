@@ -47,7 +47,7 @@ public sealed class FileDialogService : IFileDialogService
         var dialog = new OpenFolderDialog
         {
             Title = "选择包含 game 目录的 Ren’Py 项目",
-            InitialDirectory = Directory.Exists(initialDirectory) ? initialDirectory : "E:\\"
+            InitialDirectory = Directory.Exists(initialDirectory) ? initialDirectory : Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments)
         };
         return dialog.ShowDialog() == true ? dialog.FolderName : null;
     }
@@ -59,7 +59,7 @@ public sealed class FileDialogService : IFileDialogService
             Title = "选择 Ren'Py SDK 可执行文件",
             Filter = "Ren'Py 可执行文件 (renpy.exe)|renpy.exe|所有可执行文件 (*.exe)|*.exe",
             InitialDirectory = File.Exists(initialPath) ? Path.GetDirectoryName(initialPath) :
-                               Directory.Exists(initialPath) ? initialPath : "E:\\"
+                               Directory.Exists(initialPath) ? initialPath : Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments)
         };
         return dialog.ShowDialog() == true ? dialog.FileName : null;
     }
@@ -345,19 +345,20 @@ public sealed class ThemeService : IThemeService
     private Color _targetColor;
     private DateTime _animStartTime;
     private const double DurationMs = 220.0;
+    public const string DefaultAccentColor = "#D16BA5";
 
-    public string AccentColor { get; private set; } = "#D16BA5";
+    public string AccentColor { get; private set; } = DefaultAccentColor;
 
     public bool TryApplyAccent(string color, out string? error)
     {
         error = null;
-        if (ColorConverter.ConvertFromString(color) is not Color accent)
+        if (!TryParseAccentColor(color, out var accent))
         {
             error = "自定义强调色应使用 #RRGGBB。";
             return false;
         }
 
-        AccentColor = color.ToUpperInvariant();
+        AccentColor = $"#{accent.R:X2}{accent.G:X2}{accent.B:X2}";
         var resources = Application.Current.Resources;
 
         Color fromColor = Colors.Transparent;
@@ -387,7 +388,7 @@ public sealed class ThemeService : IThemeService
             var elapsed = (DateTime.UtcNow - _animStartTime).TotalMilliseconds;
             var progress = Math.Clamp(elapsed / DurationMs, 0.0, 1.0);
 
-            // Cubic ease out
+            // 使用三次缓出，避免颜色切换突然跳变。
             double ease = 1.0 - Math.Pow(1.0 - progress, 3);
 
             byte r = (byte)(_startColor.R + (_targetColor.R - _startColor.R) * ease);
@@ -407,12 +408,26 @@ public sealed class ThemeService : IThemeService
         return true;
     }
 
+    internal static bool TryParseAccentColor(string? value, out Color color)
+    {
+        color = default;
+        if (value is null || value.Length != 7 || value[0] != '#') return false;
+        if (!byte.TryParse(value.AsSpan(1, 2), System.Globalization.NumberStyles.HexNumber, null, out var red) ||
+            !byte.TryParse(value.AsSpan(3, 2), System.Globalization.NumberStyles.HexNumber, null, out var green) ||
+            !byte.TryParse(value.AsSpan(5, 2), System.Globalization.NumberStyles.HexNumber, null, out var blue)) return false;
+        color = Color.FromRgb(red, green, blue);
+        return true;
+    }
+
     private static void ApplyInstantColor(Color c)
     {
         var resources = Application.Current.Resources;
-        resources["BrandAccentBrush"] = new SolidColorBrush(c);
-        resources["BrandAccentHoverBrush"] = new SolidColorBrush(Blend(c, Colors.White, 0.16));
-        resources["BrandAccentSoftBrush"] = new SolidColorBrush(Color.FromArgb(45, c.R, c.G, c.B));
+        var main = new SolidColorBrush(c); main.Freeze();
+        var hover = new SolidColorBrush(Blend(c, Colors.White, 0.16)); hover.Freeze();
+        var soft = new SolidColorBrush(Color.FromArgb(45, c.R, c.G, c.B)); soft.Freeze();
+        resources["BrandAccentBrush"] = main;
+        resources["BrandAccentHoverBrush"] = hover;
+        resources["BrandAccentSoftBrush"] = soft;
     }
 
     private static Color Blend(Color source, Color target, double amount) => Color.FromRgb(

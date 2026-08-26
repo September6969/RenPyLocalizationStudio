@@ -1,5 +1,6 @@
 using ICSharpCode.AvalonEdit;
 using RenPyLocalizationStudio.App.Behaviors;
+using RenPyLocalizationStudio.App.Services;
 using RenPyLocalizationStudio.App.ViewModels;
 using RenPyLocalizationStudio.Core;
 
@@ -7,6 +8,37 @@ namespace RenPyLocalizationStudio.Tests;
 
 public sealed class VisualPresentationTests
 {
+    [Theory]
+    [InlineData("#D16BA5", 0xD1, 0x6B, 0xA5)]
+    [InlineData("#00ff7F", 0x00, 0xFF, 0x7F)]
+    public void Theme_只接受六位Hex并正确解析(string text, int red, int green, int blue)
+    {
+        Assert.True(ThemeService.TryParseAccentColor(text, out var color));
+        Assert.Equal(red, color.R);
+        Assert.Equal(green, color.G);
+        Assert.Equal(blue, color.B);
+    }
+
+    [Theory]
+    [InlineData("Red")]
+    [InlineData("#FFF")]
+    [InlineData("#ZZZZZZ")]
+    [InlineData("")]
+    public void Theme_拒绝非RrgGbb格式(string text) =>
+        Assert.False(ThemeService.TryParseAccentColor(text, out _));
+
+    [Fact]
+    public void Diagnostics_同时按严重度与全文筛选()
+    {
+        var error = ContentItem.FromDiagnostic(new Diagnostic(DiagnosticSeverity.Error, "BROKEN", "文件损坏", "game/a.rpy", 3));
+        var warning = ContentItem.FromDiagnostic(new Diagnostic(DiagnosticSeverity.Warning, "MISSING", "缺少译文", "game/b.rpy", 5));
+
+        var filtered = DiagnosticPresentationFilter.Apply([error, warning], nameof(DiagnosticSeverity.Warning), "b.rpy").ToArray();
+
+        Assert.Single(filtered);
+        Assert.Same(warning, filtered[0]);
+    }
+
     [Fact]
     public void CodeEditor_Tab在空行插入四个空格且Caret保持有效()
     {
@@ -108,6 +140,18 @@ public sealed class VisualPresentationTests
         Assert.Equal(2, coverage.EditableCount);
         Assert.Equal(1, coverage.TranslatedCount);
         Assert.Equal(50, coverage.Percentage);
+    }
+
+    [Fact]
+    public void ContentItem_缓存投影仍能搜索最新译文()
+    {
+        var node = DialogueNode("uv", "Source");
+        var unit = Unit(node, "旧译文");
+        var item = ContentItem.FromFlow(node, unit, null, 0);
+
+        unit.TranslationText = "实时更新的译文";
+
+        Assert.Contains("实时更新的译文", item.SearchText);
     }
 
     [Fact]

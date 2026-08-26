@@ -77,7 +77,8 @@
                                 <Grid.ColumnDefinitions><ColumnDefinition Width="24"/><ColumnDefinition Width="*"/><ColumnDefinition Width="32"/></Grid.ColumnDefinitions>
                                 <Border Width="16" Height="16" CornerRadius="3" Background="{Binding AccentPreviewBrush}"
                                         HorizontalAlignment="Left" VerticalAlignment="Center" />
-                                <TextBox Grid.Column="1" Text="{Binding AccentColor, UpdateSourceTrigger=PropertyChanged}" Padding="4" />
+                                <TextBox Grid.Column="1" Text="{Binding AccentColor, UpdateSourceTrigger=PropertyChanged}" Padding="4"
+                                         AutomationProperties.Name="自定义强调色" />
                                 <Button Grid.Column="2" Content="&#xE73E;" FontFamily="Segoe Fluent Icons" Command="{Binding ApplyAccentCommand}"
                                         CommandParameter="{Binding AccentColor}" Style="{StaticResource GhostButtonStyle}" Padding="8,4" ToolTip="应用强调色" />
                             </Grid>
@@ -117,7 +118,7 @@
                          SelectionChanged="ActivityBarList_SelectionChanged">
                     <ListBox.ItemTemplate>
                         <DataTemplate>
-                            <Grid ToolTip="{Binding Title}">
+                            <Grid ToolTip="{Binding Title}" AutomationProperties.Name="{Binding Title}">
                                 <TextBlock Text="{Binding Glyph}" FontFamily="Segoe Fluent Icons" FontSize="18" HorizontalAlignment="Center" VerticalAlignment="Center" />
                                 <Border Background="{DynamicResource SemanticErrorBrush}" CornerRadius="8" HorizontalAlignment="Right" VerticalAlignment="Top"
                                         MinWidth="16" Height="16" Margin="0,-7,-9,0" Visibility="{Binding HasBadge, Converter={StaticResource BooleanToVisibilityConverter}}">
@@ -143,7 +144,8 @@
             <TextBlock Text="{Binding Tasks.StatusMessage}" Margin="10,0" VerticalAlignment="Center" FontSize="11"
                        Foreground="{DynamicResource TextMutedBrush}" TextTrimming="CharacterEllipsis" />
             <ProgressBar Grid.Column="1" Height="3" VerticalAlignment="Bottom" BorderThickness="0" Background="Transparent"
-                         Foreground="{DynamicResource BrandAccentBrush}" IsIndeterminate="{Binding Tasks.IsBusy}" />
+                         Foreground="{DynamicResource BrandAccentBrush}" IsIndeterminate="{Binding Tasks.IsBusy}"
+                         AutomationProperties.Name="当前任务进度" />
             <TextBlock Grid.Column="2" Text="Alt+↑ / Alt+↓ 切换译文" Margin="12,0" VerticalAlignment="Center" FontSize="11"
                        Foreground="{DynamicResource TextSubtleBrush}" />
         </Grid>

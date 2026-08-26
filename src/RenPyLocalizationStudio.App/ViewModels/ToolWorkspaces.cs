@@ -280,7 +280,6 @@ public sealed class ExtraTextWorkspaceViewModel : WorkspaceViewModelBase
     public override WorkspaceSidebarViewModelBase SidebarContent => Sidebar;
     public override WorkspaceMainContentViewModelBase MainContent => Main;
     public override WorkspaceInspectorViewModelBase InspectorContent => Inspector;
-    public ObservableCollection<ExtraTextRowViewModel> Candidates => VisibleCandidates;
     public ObservableCollection<ExtraTextRowViewModel> VisibleCandidates { get; } = [];
     public IReadOnlyList<ExtraTextRowViewModel> AllCandidates => _allCandidates;
     public IAsyncRelayCommand ScanCommand { get; }
@@ -355,17 +354,7 @@ public sealed class ExtraTextWorkspaceViewModel : WorkspaceViewModelBase
         }
         await _session.Tasks.RunAsync("正在扫描额外文本……", async token =>
         {
-            var result = await _scanner.ExecuteAsync(new ExtraTextScanRequest(root.Value, _session.Language), _session.Tasks.CreateProgress(), token);
-            if (!result.IsSuccess || result.Value is null)
-            {
-                _confirmation.ShowDiagnostics("扫描失败", result.Diagnostics);
-                return;
-            }
-            _allCandidates.Clear();
-            foreach (var candidate in result.Value.Candidates) _allCandidates.Add(new ExtraTextRowViewModel(candidate));
-            Badge = _allCandidates.Count(x => !x.AlreadyTranslated).ToString();
-            RebuildVisibleCandidates();
-            _session.Tasks.StatusMessage = $"扫描完成：发现 {_allCandidates.Count:N0} 个候选。";
+            await RefreshCandidatesAsync(root.Value, token, "扫描失败");
         });
     }
 
@@ -387,8 +376,29 @@ public sealed class ExtraTextWorkspaceViewModel : WorkspaceViewModelBase
             var request = new ManagedPatchRequest(root.Value, relative, [module]);
             var result = await _patch.ExecuteAsync(new ManagedPatchWriteRequest(request, true), _session.Tasks.CreateProgress(), token);
             if (!result.IsSuccess) _confirmation.ShowDiagnostics("额外文本写入失败", result.Diagnostics);
-            else _session.Tasks.StatusMessage = $"已写入 {selected.Length} 条额外文本。";
+            else if (await RefreshCandidatesAsync(root.Value, token, "写入成功，但刷新候选失败"))
+                _session.Tasks.StatusMessage = $"已写入 {selected.Length} 条额外文本，并刷新候选状态。";
         });
+    }
+
+    private async Task<bool> RefreshCandidatesAsync(ProjectRoot root, CancellationToken cancellationToken, string failureTitle)
+    {
+        var result = await _scanner.ExecuteAsync(
+            new ExtraTextScanRequest(root, _session.Language),
+            _session.Tasks.CreateProgress(),
+            cancellationToken);
+        if (!result.IsSuccess || result.Value is null)
+        {
+            _confirmation.ShowDiagnostics(failureTitle, result.Diagnostics);
+            return false;
+        }
+
+        _allCandidates.Clear();
+        foreach (var candidate in result.Value.Candidates) _allCandidates.Add(new ExtraTextRowViewModel(candidate));
+        Badge = _allCandidates.Count(x => !x.AlreadyTranslated).ToString();
+        RebuildVisibleCandidates();
+        _session.Tasks.StatusMessage = $"扫描完成：发现 {_allCandidates.Count:N0} 个候选。";
+        return true;
     }
 }
 
@@ -408,6 +418,7 @@ public sealed class DiagnosticsWorkspaceViewModel : WorkspaceViewModelBase
 {
     private readonly ProjectSessionViewModel _session;
     private readonly IMessenger _messenger;
+    private readonly List<ContentItem> _allItems = [];
     private ContentItem? _selectedItem;
 
     public DiagnosticsWorkspaceViewModel(ProjectSessionViewModel session, IMessenger messenger)
@@ -416,7 +427,15 @@ public sealed class DiagnosticsWorkspaceViewModel : WorkspaceViewModelBase
         _session = session;
         _messenger = messenger;
         Sidebar = new SimpleSidebarViewModel { Title = "诊断", Subtitle = "解析、绑定、文件与工具问题" };
-        foreach (var severity in Enum.GetNames<DiagnosticSeverity>()) Sidebar.Items.Add(new SidebarOption(severity, severity));
+        Sidebar.Items.Add(new SidebarOption("all", "全部"));
+        foreach (var severity in Enum.GetValues<DiagnosticSeverity>())
+            Sidebar.Items.Add(new SidebarOption(severity.ToString(), DiagnosticSeverityTitle(severity)));
+        Sidebar.SelectedItem = Sidebar.Items[0];
+        Sidebar.PropertyChanged += (_, args) =>
+        {
+            if (args.PropertyName is nameof(SimpleSidebarViewModel.SelectedItem) or nameof(SimpleSidebarViewModel.SearchText))
+                RebuildVisibleItems();
+        };
         Main = new DiagnosticsMainContentViewModel(this);
         Inspector = new DiagnosticInspectorViewModel();
         OpenSourceCommand = new RelayCommand(OpenSource, () => SelectedItem?.Diagnostic is not null);
@@ -444,10 +463,25 @@ public sealed class DiagnosticsWorkspaceViewModel : WorkspaceViewModelBase
 
     private void RefreshItems()
     {
-        Items.Clear();
-        foreach (var diagnostic in _session.Snapshot?.Diagnostics ?? []) Items.Add(ContentItem.FromDiagnostic(diagnostic));
-        Badge = Items.Count(x => x.Diagnostic?.Severity == DiagnosticSeverity.Error).ToString();
+        _allItems.Clear();
+        foreach (var diagnostic in _session.Snapshot?.Diagnostics ?? []) _allItems.Add(ContentItem.FromDiagnostic(diagnostic));
+        Badge = _allItems.Count(x => x.Diagnostic?.Severity == DiagnosticSeverity.Error).ToString();
+        RebuildVisibleItems();
     }
+
+    private void RebuildVisibleItems()
+    {
+        Items.Clear();
+        foreach (var item in DiagnosticPresentationFilter.Apply(_allItems, Sidebar.SelectedItem?.Id, Sidebar.SearchText)) Items.Add(item);
+        SelectedItem = Items.FirstOrDefault();
+    }
+
+    private static string DiagnosticSeverityTitle(DiagnosticSeverity severity) => severity switch
+    {
+        DiagnosticSeverity.Error => "错误",
+        DiagnosticSeverity.Warning => "警告",
+        _ => "信息"
+    };
 
     private void OpenSource()
     {
@@ -519,12 +553,24 @@ public sealed class ArchiveWorkspaceViewModel : WorkspaceViewModelBase
         var runtime = ResolveRuntime();
         var root = _fileSystem.ValidateProjectRoot(_session.ProjectPath);
         if (runtime is null || !root.IsSuccess || root.Value is null) { if (!root.IsSuccess) _confirmation.ShowDiagnostics("项目路径无效", root.Diagnostics); return; }
-        await _session.Tasks.RunAsync("正在安全解包 RPA……", async token =>
+        string[] archives = [];
+        var planCompleted = false;
+        await _session.Tasks.RunAsync("正在生成 RPA 解包计划……", async token =>
         {
             var files = await _fileSystem.EnumerateFilesAsync(root.Value, "game", "*.rpa", token);
-            var archives = files.Value?.Select(x => x.RelativePath).ToArray() ?? [];
-            if (archives.Length == 0) { _session.Tasks.StatusMessage = "项目中未找到 RPA。"; return; }
-            if (!_confirmation.Confirm("RPA 解包计划", $"将安全检查并解包 {archives.Length} 个 RPA；已有文件跳过，源 RPA 永不删除。确认继续？", MessageBoxImage.Warning)) return;
+            if (!files.IsSuccess || files.Value is null) { _confirmation.ShowDiagnostics("RPA 扫描失败", files.Diagnostics); return; }
+            archives = files.Value.Select(x => x.RelativePath).ToArray();
+            planCompleted = true;
+        });
+        if (!planCompleted) return;
+        if (archives.Length == 0) { _session.Tasks.StatusMessage = "项目中未找到 RPA。"; return; }
+        if (!_confirmation.Confirm("RPA 解包计划", $"将安全检查并解包 {archives.Length} 个 RPA；已有文件跳过，源 RPA 永不删除。确认继续？", MessageBoxImage.Warning))
+        {
+            _session.Tasks.StatusMessage = "已取消 RPA 解包。";
+            return;
+        }
+        await _session.Tasks.RunAsync("正在安全解包 RPA……", async token =>
+        {
             var result = await _archive.ExecuteAsync(new ArchiveExtractionRequest(root.Value, new ValidatedToolPath(runtime.Value.Python), new ValidatedToolPath(runtime.Value.RpaTool), archives, "game", true), _session.Tasks.CreateProgress(), token);
             if (!result.IsSuccess) _confirmation.ShowDiagnostics("RPA 解包未完全成功", result.Diagnostics);
             else _session.Tasks.StatusMessage = $"已处理 {result.Value!.ProcessedArchives} 个 RPA；源文件全部保留。";
@@ -536,13 +582,29 @@ public sealed class ArchiveWorkspaceViewModel : WorkspaceViewModelBase
         var runtime = ResolveRuntime();
         var root = _fileSystem.ValidateProjectRoot(_session.ProjectPath);
         if (runtime is null || !root.IsSuccess || root.Value is null) { if (!root.IsSuccess) _confirmation.ShowDiagnostics("项目路径无效", root.Diagnostics); return; }
-        await _session.Tasks.RunAsync("正在反编译脚本……", async token =>
+        string[] scripts = [];
+        var planCompleted = false;
+        await _session.Tasks.RunAsync("正在生成脚本反编译计划……", async token =>
         {
             var rpyc = await _fileSystem.EnumerateFilesAsync(root.Value, "game", "*.rpyc", token);
             var rpymc = await _fileSystem.EnumerateFilesAsync(root.Value, "game", "*.rpymc", token);
-            var scripts = (rpyc.Value ?? []).Concat(rpymc.Value ?? []).Select(x => x.RelativePath).ToArray();
-            if (scripts.Length == 0) { _session.Tasks.StatusMessage = "项目中未找到 RPYC/RPYMC。"; return; }
-            if (!_confirmation.Confirm("RPYC 反编译计划", $"将反编译 {scripts.Length} 个脚本；已有 .rpy 跳过，编译文件永不删除。确认继续？", MessageBoxImage.Warning)) return;
+            if (!rpyc.IsSuccess || !rpymc.IsSuccess)
+            {
+                _confirmation.ShowDiagnostics("脚本扫描失败", rpyc.Diagnostics.Concat(rpymc.Diagnostics));
+                return;
+            }
+            scripts = (rpyc.Value ?? []).Concat(rpymc.Value ?? []).Select(x => x.RelativePath).ToArray();
+            planCompleted = true;
+        });
+        if (!planCompleted) return;
+        if (scripts.Length == 0) { _session.Tasks.StatusMessage = "项目中未找到 RPYC/RPYMC。"; return; }
+        if (!_confirmation.Confirm("RPYC 反编译计划", $"将反编译 {scripts.Length} 个脚本；已有 .rpy 跳过，编译文件永不删除。确认继续？", MessageBoxImage.Warning))
+        {
+            _session.Tasks.StatusMessage = "已取消脚本反编译。";
+            return;
+        }
+        await _session.Tasks.RunAsync("正在反编译脚本……", async token =>
+        {
             var result = await _decompiler.ExecuteAsync(new ScriptDecompileRequest(root.Value, new ValidatedToolPath(runtime.Value.Python), new ValidatedToolPath(runtime.Value.Unrpyc), scripts, true), _session.Tasks.CreateProgress(), token);
             if (!result.IsSuccess) _confirmation.ShowDiagnostics("反编译未完全成功", result.Diagnostics);
             else _session.Tasks.StatusMessage = $"已处理 {result.Value!.ProcessedScripts} 个脚本；源文件全部保留。";

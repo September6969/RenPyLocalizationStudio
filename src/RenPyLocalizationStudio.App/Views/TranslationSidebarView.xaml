@@ -10,7 +10,8 @@
         </Grid.RowDefinitions>
         <TextBlock Text="项目导航" FontSize="15" FontWeight="SemiBold" />
         <TextBlock Grid.Row="1" Text="搜索、分组与 Label 定位" Margin="0,4,0,10" FontSize="11" Foreground="{DynamicResource TextMutedBrush}" />
-        <TextBox Grid.Row="2" Text="{Binding Workspace.SearchText, UpdateSourceTrigger=PropertyChanged}" ToolTip="搜索 label、原文、译文或路径" />
+        <TextBox Grid.Row="2" Text="{Binding Workspace.SearchText, UpdateSourceTrigger=PropertyChanged}" ToolTip="搜索 label、原文、译文或路径"
+                 AutomationProperties.Name="搜索剧情流" />
         <ListBox Grid.Row="3" ItemsSource="{Binding Workspace.ViewModes}" SelectedItem="{Binding Workspace.ViewMode, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                  Margin="0,8,0,0" Background="Transparent" BorderThickness="0" ItemContainerStyle="{StaticResource SidebarTabItemStyle}"
                  ScrollViewer.HorizontalScrollBarVisibility="Disabled" ScrollViewer.VerticalScrollBarVisibility="Disabled">

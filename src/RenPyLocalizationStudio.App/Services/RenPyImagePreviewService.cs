@@ -1,7 +1,7 @@
 using System.Collections.Concurrent;
 using System.IO;
 using System.Text.RegularExpressions;
-using System.Windows.Media.Imaging;
+using SkiaSharp;
 
 namespace RenPyLocalizationStudio.App.Services;
 
@@ -90,14 +90,20 @@ public sealed partial class RenPyImagePreviewService : IRenPyImagePreviewService
         var images = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var scripts = new Dictionary<string, ScriptSceneIndex>(StringComparer.OrdinalIgnoreCase);
         var definitions = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var file in Directory.EnumerateFiles(gamePath, "*", SearchOption.AllDirectories))
+        var enumeration = new EnumerationOptions
+        {
+            RecurseSubdirectories = true,
+            IgnoreInaccessible = true,
+            AttributesToSkip = FileAttributes.ReparsePoint
+        };
+        foreach (var file in Directory.EnumerateFiles(gamePath, "*", enumeration))
         {
             cancellationToken.ThrowIfCancellationRequested();
             var fullPath = NormalizeFullPath(file);
             var extension = Path.GetExtension(fullPath);
             if (ImageExtensions.Contains(extension)) images.Add(fullPath);
             else if (extension.Equals(".rpy", StringComparison.OrdinalIgnoreCase) && !IsTranslationFile(gamePath, fullPath))
-                scripts[fullPath] = ScriptSceneIndex.Parse(File.ReadAllLines(fullPath), definitions);
+                scripts[fullPath] = ScriptSceneIndex.Parse(File.ReadLines(fullPath), definitions);
         }
         return new ProjectAssetIndex(gamePath, images.Order(StringComparer.OrdinalIgnoreCase).ToArray(), scripts, definitions);
     }
@@ -159,12 +165,17 @@ public sealed partial class RenPyImagePreviewService : IRenPyImagePreviewService
         try
         {
             using var stream = File.OpenRead(filePath);
-            var frame = BitmapDecoder.Create(stream, BitmapCreateOptions.PreservePixelFormat, BitmapCacheOption.OnLoad).Frames[0];
-            resolution = $"{frame.PixelWidth} × {frame.PixelHeight}";
+            using var codec = SKCodec.Create(stream);
+            resolution = codec is null ? "未知分辨率" : $"{codec.Info.Width} × {codec.Info.Height}";
         }
         catch { resolution = "未知分辨率"; }
-        var length = new FileInfo(filePath).Length;
-        var size = length switch { > 1048576 => $"{(double)length / 1048576:0.1} MB", > 1024 => $"{length / 1024} KB", _ => $"{length} B" };
+        string size;
+        try
+        {
+            var length = new FileInfo(filePath).Length;
+            size = length switch { > 1048576 => $"{(double)length / 1048576:0.1} MB", > 1024 => $"{length / 1024} KB", _ => $"{length} B" };
+        }
+        catch { size = "未知大小"; }
         return new ImagePreviewInfo(tag, kind, filePath, Path.GetRelativePath(projectPath, filePath), resolution, size);
     }
 
@@ -193,14 +204,17 @@ public sealed partial class RenPyImagePreviewService : IRenPyImagePreviewService
             Definitions = definitions;
             _watcher = new FileSystemWatcher(gamePath) { IncludeSubdirectories = true, NotifyFilter = NotifyFilters.FileName | NotifyFilters.DirectoryName | NotifyFilters.LastWrite | NotifyFilters.Size };
             _watcher.Changed += MarkDirty; _watcher.Created += MarkDirty; _watcher.Deleted += MarkDirty; _watcher.Renamed += MarkDirty;
+            _watcher.Error += MarkDirty;
             _watcher.EnableRaisingEvents = true;
         }
         public IReadOnlyList<string> Images { get; }
         public HashSet<string> ImageSet { get; }
         public IReadOnlyDictionary<string, ScriptSceneIndex> Scripts { get; }
         public IReadOnlyDictionary<string, string> Definitions { get; }
-        public bool IsDirty { get; private set; }
-        private void MarkDirty(object sender, FileSystemEventArgs args) => IsDirty = true;
+        private int _isDirty;
+        public bool IsDirty => Volatile.Read(ref _isDirty) != 0;
+        private void MarkDirty(object sender, FileSystemEventArgs args) => Interlocked.Exchange(ref _isDirty, 1);
+        private void MarkDirty(object sender, ErrorEventArgs args) => Interlocked.Exchange(ref _isDirty, 1);
         public void Dispose() => _watcher.Dispose();
     }
 
@@ -211,17 +225,19 @@ public sealed partial class RenPyImagePreviewService : IRenPyImagePreviewService
     {
         private readonly IReadOnlyList<SceneEvent> _events;
         private ScriptSceneIndex(IReadOnlyList<SceneEvent> events) => _events = events;
-        public static ScriptSceneIndex Parse(IReadOnlyList<string> lines, IDictionary<string, string> definitions)
+        public static ScriptSceneIndex Parse(IEnumerable<string> lines, IDictionary<string, string> definitions)
         {
             var events = new List<SceneEvent>();
-            for (var index = 0; index < lines.Count; index++)
+            var lineNumber = 0;
+            foreach (var line in lines)
             {
-                var line = lines[index]; var trimmed = line.Trim();
+                lineNumber++;
+                var trimmed = line.Trim();
                 if (trimmed.Length == 0 || trimmed.StartsWith('#')) continue;
                 var definition = ImageDefineRegex().Match(line);
                 if (definition.Success) { definitions[definition.Groups["tag"].Value.Trim()] = definition.Groups["path"].Value.Trim(); continue; }
                 foreach (var command in new[] { "scene", "show", "hide" })
-                    if (IsCommand(trimmed, command)) { events.Add(new SceneEvent(index + 1, command, ExtractImageTag(trimmed, command), trimmed)); break; }
+                    if (IsCommand(trimmed, command)) { events.Add(new SceneEvent(lineNumber, command, ExtractImageTag(trimmed, command), trimmed)); break; }
             }
             return new ScriptSceneIndex(events);
         }
