@@ -37,8 +37,6 @@ RenPy Localization Studio 是一个面向 Ren’Py 人工本地化流程的 Wind
 
 工具不会执行游戏 EXE、不会删除 `.rpa/.rpyc/.rpymc`，也不会自动翻译文本。跨文件的无显式跳转自然落入会显示为“文件结束”。
 
-提供的 `rename【去除x-前缀】.exe` 仅用于确认功能意图；程序不会运行、捆绑或复制其中代码。图片压缩由固定版本的 MIT 许可 SkiaSharp 在本地完成，不调用在线服务。
-
 ## 开发与验证
 
 ```powershell
