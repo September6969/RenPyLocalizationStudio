@@ -21,12 +21,12 @@ RenPy Localization Studio 是一个面向 Windows 的 Ren’Py 人工汉化工�
 
 ## 2. 当前可用状态
 
-截至 2026-08-26：
+截至 2026-08-27：
 
 - Release 构建通过，0 警告、0 错误。
-- 自动化测试共 54 项，全部通过。
+- 自动化测试共 62 项，全部通过。
 - 使用本机 `E:\renpy-8.5.2-sdk\renpy.exe` 对临时项目副本执行 lint，已通过。
-- 框架依赖发布已生成到 `artifacts\win-x64`。
+- 框架依赖发布由 `scripts/publish.ps1` 生成到被忽略的 `artifacts\win-x64`；本地清理后按需重新生成，正式包以 GitHub Release 为准。
 - 发布版已经完成启动烟测。
 - 已建立可审阅的 Git 基线与分层重构提交；仍不得使用破坏性 Git 命令覆盖用户改动。
 
