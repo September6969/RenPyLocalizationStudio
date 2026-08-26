@@ -48,4 +48,11 @@
           Condition="Exists('$(PkgSkiaSharp_NativeAssets_Win32)\THIRD-PARTY-NOTICES.txt')" />
   </ItemGroup>
 
+  <Target Name="RemovePublishSymbols" AfterTargets="Publish">
+    <ItemGroup>
+      <PublishSymbols Include="$(PublishDir)**\*.pdb" />
+    </ItemGroup>
+    <Delete Files="@(PublishSymbols)" />
+  </Target>
+
 </Project>
