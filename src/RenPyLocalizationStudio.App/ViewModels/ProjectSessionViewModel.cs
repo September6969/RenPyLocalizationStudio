@@ -63,6 +63,7 @@ public sealed class ProjectSessionViewModel : ObservableObject
         AnalyzeCommand = new AsyncRelayCommand(AnalyzeAsync, () => CanAnalyze);
         SaveCommand = new AsyncRelayCommand(() => SaveAsync(false), () => Snapshot is not null && !Tasks.IsBusy);
         SaveWithAnnotationsCommand = new AsyncRelayCommand(() => SaveAsync(true), () => Snapshot is not null && !Tasks.IsBusy);
+        ForceSaveCommand = new AsyncRelayCommand(() => SaveAsync(false, forceOverwrite: true), () => Snapshot is not null && !Tasks.IsBusy);
         Tasks.PropertyChanged += (_, args) =>
         {
             if (args.PropertyName == nameof(TaskCenterViewModel.IsBusy)) NotifyCommandStates();
@@ -75,6 +76,7 @@ public sealed class ProjectSessionViewModel : ObservableObject
     public IAsyncRelayCommand AnalyzeCommand { get; }
     public IAsyncRelayCommand SaveCommand { get; }
     public IAsyncRelayCommand SaveWithAnnotationsCommand { get; }
+    public IAsyncRelayCommand ForceSaveCommand { get; }
     public event EventHandler<ProjectSnapshot?>? SnapshotChanged;
 
     /// <summary>控制译文停止输入后是否自动写入项目。</summary>
@@ -196,7 +198,7 @@ public sealed class ProjectSessionViewModel : ObservableObject
 
     public Task ReloadAsync(CancellationToken cancellationToken) => AnalyzeCoreAsync(cancellationToken);
 
-    public async Task SaveAsync(bool refreshAnnotations)
+    public async Task SaveAsync(bool refreshAnnotations, bool forceOverwrite = false)
     {
         if (Snapshot is null) return;
         if (!IsSnapshotForScope(Snapshot, ProjectPath, Language))
@@ -208,6 +210,14 @@ public sealed class ProjectSessionViewModel : ObservableObject
         var snapshot = Snapshot;
         if (_taskCoordinator is not null)
             await _taskCoordinator.CancelAsync("translation-auto-save");
+        if (forceOverwrite && !_confirmation.Confirm(
+                "强制覆盖外部修改",
+                "将忽略文件自上次分析后的外部修改并覆盖写入当前译文。\n\n" +
+                "保存前仍会执行译文结构校验，并会保留最近一次 .rls.bak 备份。此操作无法自动合并外部修改，仍要继续吗？",
+                MessageBoxImage.Warning))
+        {
+            return;
+        }
         var warnings = _writer.Validate(snapshot).Where(x => x.Severity == DiagnosticSeverity.Warning).ToArray();
         if (warnings.Length > 0)
         {
@@ -217,9 +227,9 @@ public sealed class ProjectSessionViewModel : ObservableObject
 
         var saveRevision = Volatile.Read(ref _autoSaveRevision);
         var saved = false;
-        await Tasks.RunAsync("正在安全保存……", async token =>
+        await Tasks.RunAsync(forceOverwrite ? "正在强制覆盖保存……" : "正在安全保存……", async token =>
         {
-            saved = await SaveCoreAsync(snapshot, refreshAnnotations, allowWarnings: true, reloadAfterSave: true, showDiagnostics: true, token);
+            saved = await SaveCoreAsync(snapshot, refreshAnnotations, allowWarnings: true, reloadAfterSave: true, showDiagnostics: true, forceOverwrite, token);
         });
         if (saved) MarkAutoSaveRevisionPersisted(saveRevision);
     }
@@ -287,7 +297,7 @@ public sealed class ProjectSessionViewModel : ObservableObject
         await Tasks.RunAsync("正在自动保存译文……", async taskToken =>
         {
             using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, taskToken);
-            saved = await SaveCoreAsync(snapshot, refreshAnnotations: false, allowWarnings: false, reloadAfterSave: false, showDiagnostics: false, linked.Token);
+            saved = await SaveCoreAsync(snapshot, refreshAnnotations: false, allowWarnings: false, reloadAfterSave: false, showDiagnostics: false, forceOverwrite: false, linked.Token);
         });
         if (saved && revision == Volatile.Read(ref _autoSaveRevision))
             MarkAutoSaveRevisionPersisted(revision);
@@ -299,10 +309,11 @@ public sealed class ProjectSessionViewModel : ObservableObject
         bool allowWarnings,
         bool reloadAfterSave,
         bool showDiagnostics,
+        bool forceOverwrite,
         CancellationToken cancellationToken)
     {
         var result = await _writer.ExecuteAsync(
-            new ProjectSaveRequest(snapshot, refreshAnnotations, allowWarnings),
+            new ProjectSaveRequest(snapshot, refreshAnnotations, allowWarnings, forceOverwrite),
             Tasks.CreateProgress(),
             cancellationToken);
         var errors = result.Diagnostics.Where(x => x.Severity == DiagnosticSeverity.Error).ToArray();
@@ -330,7 +341,7 @@ public sealed class ProjectSessionViewModel : ObservableObject
         }
 
         Tasks.StatusMessage = reloadAfterSave
-            ? $"已安全保存 {result.Value?.SavedFiles ?? 0} 个文件；正在重新加载。"
+            ? $"已{(forceOverwrite ? "强制覆盖" : "安全")}保存 {result.Value?.SavedFiles ?? 0} 个文件；正在重新加载。"
             : $"自动保存完成：{result.Value?.SavedFiles ?? 0} 个文件。";
         if (reloadAfterSave) await AnalyzeCoreAsync(cancellationToken);
         return true;
@@ -414,5 +425,6 @@ public sealed class ProjectSessionViewModel : ObservableObject
         AnalyzeCommand.NotifyCanExecuteChanged();
         SaveCommand.NotifyCanExecuteChanged();
         SaveWithAnnotationsCommand.NotifyCanExecuteChanged();
+        ForceSaveCommand.NotifyCanExecuteChanged();
     }
 }

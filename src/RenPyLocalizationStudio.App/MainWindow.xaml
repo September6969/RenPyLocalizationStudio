@@ -77,6 +77,11 @@
                             <CheckBox Content="编辑后自动保存" IsChecked="{Binding Session.AutoSaveEnabled, Mode=TwoWay}"
                                       Foreground="{DynamicResource TextPrimaryBrush}" FontSize="12" Margin="0,2,0,12"
                                       ToolTip="译文停止输入约 0.9 秒后自动写入，存在结构警告时需手动确认。" />
+                            <Border Height="1" Background="{DynamicResource BackgroundLevel1}" Margin="0,0,0,10" />
+                            <TextBlock Text="保存" FontSize="11" Foreground="{DynamicResource TextSubtleBrush}" Margin="0,0,0,4" />
+                            <Button Content="强制覆盖外部修改" Command="{Binding Session.ForceSaveCommand}"
+                                    Style="{StaticResource GhostButtonStyle}" HorizontalAlignment="Left" Padding="8,4"
+                                    ToolTip="忽略外部修改哈希冲突并保存；会先要求确认并保留 .rls.bak 备份。" />
                             <Grid>
                                 <Grid.ColumnDefinitions><ColumnDefinition Width="24"/><ColumnDefinition Width="*"/><ColumnDefinition Width="32"/></Grid.ColumnDefinitions>
                                 <Border Width="16" Height="16" CornerRadius="3" Background="{Binding AccentPreviewBrush}"

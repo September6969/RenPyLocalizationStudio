@@ -49,9 +49,10 @@ internal static class TestFiles
         ProjectSnapshot snapshot,
         bool refreshAnnotations,
         bool allowWarnings,
+        bool forceOverwrite = false,
         CancellationToken cancellationToken = default) =>
         new ProjectWriter(new FileSystemService()).ExecuteAsync(
-            new ProjectSaveRequest(snapshot, refreshAnnotations, allowWarnings),
+            new ProjectSaveRequest(snapshot, refreshAnnotations, allowWarnings, forceOverwrite),
             new Progress<ToolOperationProgress>(),
             cancellationToken);
 

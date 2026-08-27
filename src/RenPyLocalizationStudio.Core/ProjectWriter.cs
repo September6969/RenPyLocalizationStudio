@@ -3,7 +3,14 @@ using RenPyLocalizationStudio.Core.Services;
 
 namespace RenPyLocalizationStudio.Core;
 
-public sealed record ProjectSaveRequest(ProjectSnapshot Snapshot, bool RefreshAnnotations, bool AllowWarnings);
+/// <summary>
+/// 翻译文件保存请求。ForceOverwrite 只跳过外部修改哈希比对；翻译结构校验、路径校验和原子备份始终保留。
+/// </summary>
+public sealed record ProjectSaveRequest(
+    ProjectSnapshot Snapshot,
+    bool RefreshAnnotations,
+    bool AllowWarnings,
+    bool ForceOverwrite = false);
 public sealed record SaveSummary(int SavedFiles);
 public interface IProjectSaveService : IAsyncOperationService<ProjectSaveRequest, SaveSummary>
 {
@@ -96,7 +103,10 @@ public sealed class ProjectWriter : IProjectSaveService
             var validationFile = CloneWithText(document.File, editedText);
             _tlParser.Parse(validationFile, document.RelativePath, snapshot.Language);
             var write = await _fileSystem.AtomicWriteAsync(
-                new AtomicWriteRequest(targetResult.Value, document.File.Encode(editedText), document.File.Sha256),
+                new AtomicWriteRequest(
+                    targetResult.Value,
+                    document.File.Encode(editedText),
+                    request.ForceOverwrite ? null : document.File.Sha256),
                 progress,
                 cancellationToken).ConfigureAwait(false);
             if (!write.IsSuccess)

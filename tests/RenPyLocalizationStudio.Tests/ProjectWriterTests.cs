@@ -81,6 +81,24 @@ translate schinese python:
     }
 
     [Fact]
+    public async Task Save_强制覆盖外部修改时保留备份且仍写入译文()
+    {
+        await using var project = await TestFiles.CreateProjectAsync(Source, Tl);
+        var snapshot = await TestFiles.AnalyzeAsync(project.Root);
+        snapshot.SharedStrings.Single().Translation = "选择";
+        await File.AppendAllTextAsync(project.TlPath, "\n# 外部修改\n", new UTF8Encoding(false));
+
+        var result = await TestFiles.SaveAsync(snapshot, false, true, forceOverwrite: true);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(1, result.Value?.SavedFiles);
+        var saved = await File.ReadAllTextAsync(project.TlPath, new UTF8Encoding(false));
+        var backup = await File.ReadAllTextAsync(project.TlPath + ".rls.bak", new UTF8Encoding(false));
+        Assert.Contains("new \"选择\"", saved);
+        Assert.Contains("# 外部修改", backup);
+    }
+
+    [Fact]
     public async Task Save_原始块模式只替换块体并保留Translate头()
     {
         const string source = """
