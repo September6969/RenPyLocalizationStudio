@@ -9,6 +9,11 @@ using RenPyLocalizationStudio.Core.Services;
 
 namespace RenPyLocalizationStudio.App.ViewModels;
 
+public sealed record SavedTranslationPosition(
+    string? ItemId,
+    string? ViewMode,
+    string? GroupingMode);
+
 public sealed class ProjectSessionViewModel : ObservableObject
 {
     private readonly IProjectAnalysisService _analysisService;
@@ -18,11 +23,21 @@ public sealed class ProjectSessionViewModel : ObservableObject
     private readonly IConfirmationService _confirmation;
     private readonly AppSettingsStore _settings;
     private readonly IThemeService _theme;
+    private readonly WorkspaceTaskCoordinator? _taskCoordinator;
     private string _projectPath = string.Empty;
     private string _language = string.Empty;
     private string _sdkPath = string.Empty;
+    private bool _autoSaveEnabled = true;
+    private string? _lastTranslationItemId;
+    private string? _lastTranslationViewMode;
+    private string? _lastTranslationGroupingMode;
+    private string? _lastTranslationProjectPath;
+    private string? _lastTranslationLanguage;
     private ProjectSnapshot? _snapshot;
     private long _languageRequestVersion;
+    private long _scopeVersion;
+    private long _autoSaveRevision;
+    private long _persistedAutoSaveRevision;
 
     public ProjectSessionViewModel(
         IProjectAnalysisService analysisService,
@@ -32,7 +47,8 @@ public sealed class ProjectSessionViewModel : ObservableObject
         IConfirmationService confirmation,
         AppSettingsStore settings,
         IThemeService theme,
-        TaskCenterViewModel tasks)
+        TaskCenterViewModel tasks,
+        WorkspaceTaskCoordinator? taskCoordinator = null)
     {
         _analysisService = analysisService;
         _catalogService = catalogService;
@@ -41,6 +57,7 @@ public sealed class ProjectSessionViewModel : ObservableObject
         _confirmation = confirmation;
         _settings = settings;
         _theme = theme;
+        _taskCoordinator = taskCoordinator;
         Tasks = tasks;
         ChooseProjectCommand = new AsyncRelayCommand(ChooseProjectAsync);
         AnalyzeCommand = new AsyncRelayCommand(AnalyzeAsync, () => CanAnalyze);
@@ -60,12 +77,36 @@ public sealed class ProjectSessionViewModel : ObservableObject
     public IAsyncRelayCommand SaveWithAnnotationsCommand { get; }
     public event EventHandler<ProjectSnapshot?>? SnapshotChanged;
 
+    /// <summary>控制译文停止输入后是否自动写入项目。</summary>
+    public bool AutoSaveEnabled
+    {
+        get => _autoSaveEnabled;
+        set
+        {
+            if (!SetProperty(ref _autoSaveEnabled, value)) return;
+            OnPropertyChanged(nameof(AutoSaveDescription));
+        }
+    }
+
+    public string AutoSaveDescription => AutoSaveEnabled ? "译文停止输入后自动保存" : "自动保存已关闭";
+
+    public SavedTranslationPosition? LastTranslationPosition => IsLastTranslationPositionInCurrentScope()
+        ? new(_lastTranslationItemId, _lastTranslationViewMode, _lastTranslationGroupingMode)
+        : null;
+
     public string ProjectPath
     {
         get => _projectPath;
         set
         {
             if (!SetProperty(ref _projectPath, value)) return;
+            Languages.Clear();
+            if (_language.Length > 0)
+            {
+                _language = string.Empty;
+                OnPropertyChanged(nameof(Language));
+            }
+            InvalidateSnapshot();
             OnPropertyChanged(nameof(ProjectName));
             OnPropertyChanged(nameof(CanAnalyze));
             NotifyCommandStates();
@@ -80,6 +121,7 @@ public sealed class ProjectSessionViewModel : ObservableObject
         set
         {
             if (!SetProperty(ref _language, value)) return;
+            InvalidateSnapshot();
             OnPropertyChanged(nameof(CanAnalyze));
             NotifyCommandStates();
         }
@@ -104,15 +146,21 @@ public sealed class ProjectSessionViewModel : ObservableObject
         set => SetProperty(ref _sdkPath, value);
     }
 
-    public async Task InitializeAsync()
+    public async Task InitializeAsync(CancellationToken cancellationToken = default)
     {
-        var saved = await _settings.LoadAsync(CancellationToken.None);
+        var saved = await _settings.LoadAsync(cancellationToken);
         _theme.TryApplyAccent(saved.AccentColor, out _);
         if (!string.IsNullOrWhiteSpace(saved.SdkPath)) _sdkPath = saved.SdkPath;
+        AutoSaveEnabled = saved.AutoSaveEnabled;
+        _lastTranslationItemId = saved.LastTranslationItemId;
+        _lastTranslationViewMode = saved.LastTranslationViewMode;
+        _lastTranslationGroupingMode = saved.LastTranslationGroupingMode;
+        _lastTranslationProjectPath = saved.LastProject;
+        _lastTranslationLanguage = saved.LastLanguage;
         if (!string.IsNullOrWhiteSpace(saved.LastProject) && Directory.Exists(saved.LastProject))
         {
             ProjectPath = saved.LastProject!;
-            await LoadLanguagesAsync(saved.LastLanguage);
+            await LoadLanguagesAsync(saved.LastLanguage, cancellationToken);
         }
     }
 
@@ -151,32 +199,157 @@ public sealed class ProjectSessionViewModel : ObservableObject
     public async Task SaveAsync(bool refreshAnnotations)
     {
         if (Snapshot is null) return;
-        var warnings = _writer.Validate(Snapshot).Where(x => x.Severity == DiagnosticSeverity.Warning).ToArray();
+        if (!IsSnapshotForScope(Snapshot, ProjectPath, Language))
+        {
+            Snapshot = null;
+            Tasks.StatusMessage = "项目或语言已切换，请重新分析后再保存。";
+            return;
+        }
+        var snapshot = Snapshot;
+        if (_taskCoordinator is not null)
+            await _taskCoordinator.CancelAsync("translation-auto-save");
+        var warnings = _writer.Validate(snapshot).Where(x => x.Severity == DiagnosticSeverity.Warning).ToArray();
         if (warnings.Length > 0)
         {
             var message = string.Join(Environment.NewLine, warnings.Take(8).Select(x => "• " + x.Message));
             if (!_confirmation.Confirm("译文结构警告", message + Environment.NewLine + Environment.NewLine + "仍要保存吗？", MessageBoxImage.Warning)) return;
         }
 
+        var saveRevision = Volatile.Read(ref _autoSaveRevision);
+        var saved = false;
         await Tasks.RunAsync("正在安全保存……", async token =>
         {
-            var result = await _writer.ExecuteAsync(
-                new ProjectSaveRequest(Snapshot, refreshAnnotations, true),
-                Tasks.CreateProgress(),
-                token);
-            var errors = result.Diagnostics.Where(x => x.Severity == DiagnosticSeverity.Error).ToArray();
-            if (errors.Length > 0)
-            {
-                _confirmation.ShowDiagnostics("保存失败", errors);
-                return;
-            }
-            Tasks.StatusMessage = $"已安全保存 {result.Value?.SavedFiles ?? 0} 个文件；正在重新加载。";
-            await AnalyzeCoreAsync(token);
+            saved = await SaveCoreAsync(snapshot, refreshAnnotations, allowWarnings: true, reloadAfterSave: true, showDiagnostics: true, token);
         });
+        if (saved) MarkAutoSaveRevisionPersisted(saveRevision);
     }
 
-    public Task PersistSettingsAsync(CancellationToken cancellationToken = default) =>
-        _settings.SaveAsync(new AppSettings(ProjectPath, Language, _theme.AccentColor, _sdkPath), cancellationToken);
+    /// <summary>更新下次启动要恢复的翻译位置；实际写入由调用方负责合并调度。</summary>
+    public void UpdateLastTranslationPosition(string? itemId, string? viewMode, string? groupingMode)
+    {
+        _lastTranslationItemId = itemId;
+        _lastTranslationViewMode = viewMode;
+        _lastTranslationGroupingMode = groupingMode;
+        _lastTranslationProjectPath = ProjectPath;
+        _lastTranslationLanguage = Language;
+    }
+
+    /// <summary>译文发生变化时启动可取消的防抖自动保存。</summary>
+    public void ScheduleAutoSave()
+    {
+        if (!AutoSaveEnabled || Snapshot is null || _taskCoordinator is null) return;
+        var revision = Interlocked.Increment(ref _autoSaveRevision);
+        _taskCoordinator.StartLatestAfterDelay(
+            "translation-auto-save",
+            TimeSpan.FromMilliseconds(900),
+            cancellationToken => AutoSaveAsync(revision, cancellationToken));
+    }
+
+    /// <summary>窗口关闭前保存仍处于防抖等待中的最新译文。</summary>
+    public async Task FlushAutoSaveAsync(CancellationToken cancellationToken)
+    {
+        if (!AutoSaveEnabled || Snapshot is null || _taskCoordinator is null) return;
+        await _taskCoordinator.CancelAsync("translation-auto-save");
+        var revision = Volatile.Read(ref _autoSaveRevision);
+        if (revision <= Volatile.Read(ref _persistedAutoSaveRevision)) return;
+        await AutoSaveAsync(revision, cancellationToken);
+    }
+
+    public Task PersistSettingsAsync(CancellationToken cancellationToken = default)
+    {
+        var positionIsCurrent = IsLastTranslationPositionInCurrentScope();
+        return _settings.SaveAsync(new AppSettings(
+            ProjectPath,
+            Language,
+            _theme.AccentColor,
+            _sdkPath,
+            AutoSaveEnabled,
+            positionIsCurrent ? _lastTranslationItemId : null,
+            positionIsCurrent ? _lastTranslationViewMode : null,
+            positionIsCurrent ? _lastTranslationGroupingMode : null), cancellationToken);
+    }
+
+    private async Task AutoSaveAsync(long revision, CancellationToken cancellationToken)
+    {
+        if (!AutoSaveEnabled || Snapshot is null) return;
+        while (Tasks.IsBusy)
+            await Task.Delay(TimeSpan.FromMilliseconds(150), cancellationToken);
+
+        var snapshot = Snapshot;
+        var warnings = _writer.Validate(snapshot).Where(x => x.Severity == DiagnosticSeverity.Warning).ToArray();
+        if (warnings.Length > 0)
+        {
+            Tasks.StatusMessage = "自动保存已跳过：存在译文结构警告，请使用手动保存确认。";
+            return;
+        }
+
+        var saved = false;
+        await Tasks.RunAsync("正在自动保存译文……", async taskToken =>
+        {
+            using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, taskToken);
+            saved = await SaveCoreAsync(snapshot, refreshAnnotations: false, allowWarnings: false, reloadAfterSave: false, showDiagnostics: false, linked.Token);
+        });
+        if (saved && revision == Volatile.Read(ref _autoSaveRevision))
+            MarkAutoSaveRevisionPersisted(revision);
+    }
+
+    private async Task<bool> SaveCoreAsync(
+        ProjectSnapshot snapshot,
+        bool refreshAnnotations,
+        bool allowWarnings,
+        bool reloadAfterSave,
+        bool showDiagnostics,
+        CancellationToken cancellationToken)
+    {
+        var result = await _writer.ExecuteAsync(
+            new ProjectSaveRequest(snapshot, refreshAnnotations, allowWarnings),
+            Tasks.CreateProgress(),
+            cancellationToken);
+        var errors = result.Diagnostics.Where(x => x.Severity == DiagnosticSeverity.Error).ToArray();
+        if (!result.IsSuccess || errors.Length > 0)
+        {
+            if (result.Status != OperationStatus.Cancelled && showDiagnostics)
+            {
+                var diagnostics = result.Diagnostics.Count > 0
+                    ? result.Diagnostics
+                    : [new Diagnostic(DiagnosticSeverity.Error, "SAVE_FAILED", "保存未完成。")];
+                _confirmation.ShowDiagnostics("保存失败", diagnostics);
+            }
+            else if (result.Status != OperationStatus.Cancelled)
+            {
+                var first = result.Diagnostics.FirstOrDefault()?.Message ?? "文件可能已被外部修改。";
+                Tasks.StatusMessage = $"自动保存失败：{first}";
+                foreach (var diagnostic in result.Diagnostics.Take(3))
+                    Tasks.Logs.Add(new ToolLogEntry(diagnostic.Message, diagnostic.Severity == DiagnosticSeverity.Error ? "Error" : "Warning"));
+            }
+            else
+            {
+                Tasks.StatusMessage = "保存已取消。";
+            }
+            return false;
+        }
+
+        Tasks.StatusMessage = reloadAfterSave
+            ? $"已安全保存 {result.Value?.SavedFiles ?? 0} 个文件；正在重新加载。"
+            : $"自动保存完成：{result.Value?.SavedFiles ?? 0} 个文件。";
+        if (reloadAfterSave) await AnalyzeCoreAsync(cancellationToken);
+        return true;
+    }
+
+    private bool IsLastTranslationPositionInCurrentScope() =>
+        string.Equals(_lastTranslationProjectPath, ProjectPath, StringComparison.OrdinalIgnoreCase) &&
+        string.Equals(_lastTranslationLanguage, Language, StringComparison.OrdinalIgnoreCase);
+
+    private void MarkAutoSaveRevisionPersisted(long revision)
+    {
+        long persisted;
+        do
+        {
+            persisted = Volatile.Read(ref _persistedAutoSaveRevision);
+            if (revision <= persisted) return;
+        }
+        while (Interlocked.CompareExchange(ref _persistedAutoSaveRevision, revision, persisted) != persisted);
+    }
 
     private async Task ChooseProjectAsync()
     {
@@ -188,8 +361,18 @@ public sealed class ProjectSessionViewModel : ObservableObject
 
     private async Task AnalyzeCoreAsync(CancellationToken token)
     {
+        var scopeVersion = Volatile.Read(ref _scopeVersion);
+        var projectPath = ProjectPath;
+        var language = Language;
         var result = await _analysisService.ExecuteAsync(
-            new ProjectAnalysisRequest(ProjectPath, Language), Tasks.CreateProgress(), token);
+            new ProjectAnalysisRequest(projectPath, language), Tasks.CreateProgress(), token);
+        if (scopeVersion != Volatile.Read(ref _scopeVersion) ||
+            !string.Equals(projectPath, ProjectPath, StringComparison.OrdinalIgnoreCase) ||
+            !string.Equals(language, Language, StringComparison.OrdinalIgnoreCase))
+        {
+            Tasks.StatusMessage = "项目或语言已切换，已丢弃旧分析结果。";
+            return;
+        }
         if (!result.IsSuccess || result.Value is null)
         {
             _confirmation.ShowDiagnostics("分析失败", result.Diagnostics);
@@ -198,6 +381,32 @@ public sealed class ProjectSessionViewModel : ObservableObject
         Snapshot = result.Value;
         await PersistSettingsAsync(token);
         Tasks.StatusMessage = $"完成：{Snapshot.Graph.Nodes.Count:N0} 个流程节点，{Snapshot.TranslationUnits.Count():N0} 个翻译条目，{Snapshot.Diagnostics.Count:N0} 条诊断。";
+    }
+
+    internal static bool IsSnapshotForScope(ProjectSnapshot snapshot, string projectPath, string language)
+    {
+        try
+        {
+            return string.Equals(
+                       Path.TrimEndingDirectorySeparator(Path.GetFullPath(snapshot.ProjectRoot)),
+                       Path.TrimEndingDirectorySeparator(Path.GetFullPath(projectPath)),
+                       StringComparison.OrdinalIgnoreCase) &&
+                   string.Equals(snapshot.Language, language, StringComparison.OrdinalIgnoreCase);
+        }
+        catch (Exception exception) when (exception is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return false;
+        }
+    }
+
+    private void InvalidateSnapshot()
+    {
+        Interlocked.Increment(ref _scopeVersion);
+        if (Tasks.CancelCommand.CanExecute(null)) Tasks.CancelCommand.Execute(null);
+        Snapshot = null;
+        Interlocked.Exchange(ref _autoSaveRevision, 0);
+        Interlocked.Exchange(ref _persistedAutoSaveRevision, 0);
+        _taskCoordinator?.StartLatest("translation-auto-save", _ => Task.CompletedTask);
     }
 
     private void NotifyCommandStates()

@@ -117,6 +117,32 @@ public sealed class VisualPresentationTests
     }
 
     [Fact]
+    public void TranslationWorkspace_首次切换书签为添加再次切换为移除()
+    {
+        var bookmarks = new HashSet<string>(StringComparer.Ordinal);
+
+        Assert.True(TranslationWorkspaceViewModel.ToggleBookmarkState(bookmarks, "node"));
+        Assert.Contains("node", bookmarks);
+        Assert.False(TranslationWorkspaceViewModel.ToggleBookmarkState(bookmarks, "node"));
+        Assert.Empty(bookmarks);
+    }
+
+    [Fact]
+    public void ProjectSession_快照仅能用于当前项目和语言()
+    {
+        var snapshot = new ProjectSnapshot
+        {
+            ProjectRoot = @"E:\GameA",
+            GameDirectory = @"E:\GameA\game",
+            Language = "schinese"
+        };
+
+        Assert.True(ProjectSessionViewModel.IsSnapshotForScope(snapshot, @"E:\GameA", "schinese"));
+        Assert.False(ProjectSessionViewModel.IsSnapshotForScope(snapshot, @"E:\GameB", "schinese"));
+        Assert.False(ProjectSessionViewModel.IsSnapshotForScope(snapshot, @"E:\GameA", "english"));
+    }
+
+    [Fact]
     public void TranslationNavigation_向下遇到Jump时定位目标Label()
     {
         var jump = new FlowNode

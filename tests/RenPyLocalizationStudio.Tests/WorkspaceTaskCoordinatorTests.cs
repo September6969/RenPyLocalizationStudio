@@ -45,4 +45,52 @@ public sealed class WorkspaceTaskCoordinatorTests
         await coordinator.CancelAsync("preview");
         await running;
     }
+
+    [Fact]
+    public async Task RunLatestAfterDelay_安静期内只执行最后一次操作()
+    {
+        var completed = new List<string>();
+        using var coordinator = new WorkspaceTaskCoordinator(_ => { });
+        var first = coordinator.RunLatestAfterDelayAsync(
+            "autosave",
+            TimeSpan.FromMilliseconds(100),
+            _ =>
+            {
+                completed.Add("first");
+                return Task.CompletedTask;
+            });
+        var second = coordinator.RunLatestAfterDelayAsync(
+            "autosave",
+            TimeSpan.FromMilliseconds(10),
+            _ =>
+            {
+                completed.Add("second");
+                return Task.CompletedTask;
+            });
+
+        await Task.WhenAll(first, second);
+
+        Assert.Equal(["second"], completed);
+    }
+
+    [Fact]
+    public async Task RunLatest_被替换的调用只等待自身结束()
+    {
+        using var coordinator = new WorkspaceTaskCoordinator(_ => { });
+        var firstStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseSecond = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var first = coordinator.RunLatestAsync("workspace", async token =>
+        {
+            firstStarted.SetResult();
+            await Task.Delay(TimeSpan.FromMinutes(1), token);
+        });
+        await firstStarted.Task;
+        var second = coordinator.RunLatestAsync("workspace", _ => releaseSecond.Task);
+
+        await first.WaitAsync(TimeSpan.FromSeconds(1));
+
+        Assert.False(second.IsCompleted);
+        releaseSecond.SetResult();
+        await second;
+    }
 }

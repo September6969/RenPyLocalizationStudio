@@ -1,7 +1,12 @@
+using System.ComponentModel;
 using System.Runtime.InteropServices;
 using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Interop;
+using System.Windows.Media;
+using ICSharpCode.AvalonEdit;
 using RenPyLocalizationStudio.App.ViewModels;
 
 namespace RenPyLocalizationStudio.App;
@@ -17,6 +22,8 @@ public partial class MainWindow : Window
     private HwndSource? _source;
     private bool? _sidebarExpanded;
     private bool? _inspectorExpanded;
+    private bool _shutdownInProgress;
+    private bool _shutdownComplete;
 
     public MainWindow(MainViewModel viewModel)
     {
@@ -197,6 +204,30 @@ public partial class MainWindow : Window
         _source = null;
     }
 
+    private async void OnWindowClosing(object? sender, CancelEventArgs e)
+    {
+        if (_shutdownComplete) return;
+        e.Cancel = true;
+        if (_shutdownInProgress) return;
+
+        _shutdownInProgress = true;
+        try
+        {
+            using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            await _viewModel.ShutdownAsync(cancellation.Token);
+        }
+        catch (Exception exception)
+        {
+            _viewModel.Tasks.Logs.Add(new ToolLogEntry($"关闭前保存失败：{exception.Message}", "Warning"));
+        }
+        finally
+        {
+            _shutdownComplete = true;
+            _shutdownInProgress = false;
+            Close();
+        }
+    }
+
     private void OnWindowSizeChanged(object sender, SizeChangedEventArgs e) => UpdateResponsiveLayout(e.NewSize.Width);
 
     private void UpdateResponsiveLayout(double width)
@@ -262,11 +293,38 @@ public partial class MainWindow : Window
 
     private void OnWindowPreviewKeyDown(object sender, KeyEventArgs e)
     {
+        // Alt+←/→ 保留给文本编辑器的单词移动；在编辑器之外拦截，避免被误当成窗口/历史导航。
+        var pressedKey = e.Key == Key.System ? e.SystemKey : e.Key;
+        if (Keyboard.Modifiers.HasFlag(ModifierKeys.Alt) &&
+            (pressedKey is Key.Left or Key.Right) &&
+            !IsTextEditorFocused(Keyboard.FocusedElement as DependencyObject ?? e.OriginalSource as DependencyObject))
+        {
+            e.Handled = true;
+            return;
+        }
+
         if (e.Key != Key.System || e.SystemKey != Key.Space) return;
         var point = PointToScreen(new Point(0, 40));
         SystemCommands.ShowSystemMenu(this, point);
         e.Handled = true;
     }
+
+    private static bool IsTextEditorFocused(DependencyObject? source)
+    {
+        for (var current = source; current is not null; current = GetParent(current))
+        {
+            if (current is TextEditor or TextBoxBase) return true;
+        }
+
+        return false;
+    }
+
+    private static DependencyObject? GetParent(DependencyObject element) => element switch
+    {
+        Visual visual => VisualTreeHelper.GetParent(visual),
+        FrameworkContentElement content => content.Parent,
+        _ => null
+    };
 
     private void TryEnableMica()
     {

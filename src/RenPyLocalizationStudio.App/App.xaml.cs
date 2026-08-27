@@ -36,7 +36,8 @@ public partial class App : Application
             confirmation,
             settings,
             theme,
-            tasks);
+            tasks,
+            taskCoordinator);
         var patchService = new ManagedPatchService(fileSystem);
         var translation = new TranslationWorkspaceViewModel(session);
         var tl = new TlWorkspaceViewModel(session, new RenPySdkService(fileSystem, processRunner), confirmation, dialogs);

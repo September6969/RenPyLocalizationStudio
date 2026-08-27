@@ -15,6 +15,7 @@ public enum InspectorMode { Empty, Flow, TranslationEditor }
 
 public sealed class ImagePreviewViewModel : ObservableObject
 {
+    private const int PreviewDecodePixelWidth = 1600;
     private ImagePreviewInfo? _selectedImage;
     private BitmapImage? _currentBitmap;
     private bool _hasImages;
@@ -96,6 +97,7 @@ public sealed class ImagePreviewViewModel : ObservableObject
             var bitmap = new BitmapImage();
             bitmap.BeginInit();
             bitmap.CacheOption = BitmapCacheOption.OnLoad;
+            bitmap.DecodePixelWidth = PreviewDecodePixelWidth;
             bitmap.UriSource = new Uri(path, UriKind.Absolute);
             bitmap.EndInit();
             bitmap.Freeze();
@@ -157,7 +159,7 @@ public sealed class TranslationMainContentViewModel : WorkspaceMainContentViewMo
     public TranslationWorkspaceViewModel Workspace { get; }
 }
 
-public sealed class TranslationInspectorViewModel : WorkspaceInspectorViewModelBase
+public sealed partial class TranslationInspectorViewModel : WorkspaceInspectorViewModelBase
 {
     private readonly TranslationValidator _validator = new();
     private readonly TaskCenterViewModel _tasks;
@@ -172,6 +174,9 @@ public sealed class TranslationInspectorViewModel : WorkspaceInspectorViewModelB
     private long _focusRequest;
     private bool _updating;
     private InspectorStateViewModel _currentInspectorState = new EmptyInspectorStateViewModel();
+
+    [GeneratedRegex(@"\[[^\]\r\n]+\]|%\([^)]+\)[#0\- +]?[0-9.*]*[a-zA-Z]|%(?:[#0\- +]?[0-9.*]*)[a-zA-Z]|\{/?[^{}\r\n]+\}")]
+    private static partial Regex PlaceholderTokenRegex();
 
     public TranslationInspectorViewModel(TaskCenterViewModel tasks)
     {
@@ -219,7 +224,7 @@ public sealed class TranslationInspectorViewModel : WorkspaceInspectorViewModelB
         ValidationMessage = string.Empty;
         DocumentKey = target?.Key ?? "none:" + fallbackTitle;
         PlaceholderTokens.Clear();
-        foreach (Match token in Regex.Matches(SourceText, @"\[[^\]\r\n]+\]|%\([^)]+\)[#0\- +]?[0-9.*]*[a-zA-Z]|%(?:[#0\- +]?[0-9.*]*)[a-zA-Z]|\{/?[^{}\r\n]+\}"))
+        foreach (Match token in PlaceholderTokenRegex().Matches(SourceText))
             if (!PlaceholderTokens.Contains(token.Value)) PlaceholderTokens.Add(token.Value);
         CurrentInspectorState = target is not null
             ? new TranslationEditorInspectorStateViewModel(this)
@@ -262,6 +267,8 @@ public sealed class TranslationWorkspaceViewModel : WorkspaceViewModelBase, IDis
     private readonly Dictionary<SharedStringEntry, List<ContentItem>> _sharedPresentationItems = new(ReferenceEqualityComparer.Instance);
     private readonly HashSet<string> _bookmarkedNodeIds = new(StringComparer.Ordinal);
     private CancellationTokenSource? _previewCancellation;
+    private Task _previewTask = Task.CompletedTask;
+    private Task _previewCleanupTask = Task.CompletedTask;
     private long _previewVersion;
 
     public TranslationWorkspaceViewModel(ProjectSessionViewModel session, IRenPyImagePreviewService? imagePreviewService = null)
@@ -275,6 +282,8 @@ public sealed class TranslationWorkspaceViewModel : WorkspaceViewModelBase, IDis
         Inspector = new TranslationInspectorViewModel(session.Tasks);
         ImagePreview = new ImagePreviewViewModel();
         OpenSelectedCommand = new RelayCommand(OpenSelected);
+        NavigateBookmarkCommand = new RelayCommand<ContentItem>(NavigateBookmarkToSource,
+            item => ViewMode == TranslationViewMode.Bookmarks && item?.Node is not null);
         NavigateLabelCommand = new RelayCommand(NavigateSelectedLabel, () => SelectedLabel is not null);
         MovePreviousCommand = new RelayCommand(() => MoveEditable(-1));
         MoveNextCommand = new RelayCommand(() => MoveEditable(1));
@@ -296,6 +305,7 @@ public sealed class TranslationWorkspaceViewModel : WorkspaceViewModelBase, IDis
     public IReadOnlyList<TranslationViewMode> ViewModes { get; } = Enum.GetValues<TranslationViewMode>();
     public IReadOnlyList<FlowGroupingMode> GroupingModes { get; } = Enum.GetValues<FlowGroupingMode>();
     public IRelayCommand OpenSelectedCommand { get; }
+    public IRelayCommand<ContentItem> NavigateBookmarkCommand { get; }
     public IRelayCommand NavigateLabelCommand { get; }
     public IRelayCommand MovePreviousCommand { get; }
     public IRelayCommand MoveNextCommand { get; }
@@ -311,6 +321,9 @@ public sealed class TranslationWorkspaceViewModel : WorkspaceViewModelBase, IDis
             RebuildProjection();
             RebuildNavigation();
             OnPropertyChanged(nameof(NavigationHeading));
+            OnPropertyChanged(nameof(IsBookmarkView));
+            NavigateBookmarkCommand.NotifyCanExecuteChanged();
+            PositionChanged?.Invoke(this, EventArgs.Empty);
         }
     }
 
@@ -323,6 +336,7 @@ public sealed class TranslationWorkspaceViewModel : WorkspaceViewModelBase, IDis
             RebuildProjection();
             RebuildNavigation();
             OnPropertyChanged(nameof(NavigationHeading));
+            PositionChanged?.Invoke(this, EventArgs.Empty);
         }
     }
 
@@ -346,6 +360,8 @@ public sealed class TranslationWorkspaceViewModel : WorkspaceViewModelBase, IDis
             UpdateInspector(value);
             StartImagePreviewUpdate(value);
             if (value is not null) ScrollAnchor = new ScrollAnchor(value.Key, FallbackIndex: VisibleItems.IndexOf(value));
+            NavigateBookmarkCommand.NotifyCanExecuteChanged();
+            PositionChanged?.Invoke(this, EventArgs.Empty);
         }
     }
 
@@ -372,12 +388,14 @@ public sealed class TranslationWorkspaceViewModel : WorkspaceViewModelBase, IDis
         TranslationViewMode.Bookmarks => "书签",
         _ => "剧情流"
     };
+    public bool IsBookmarkView => ViewMode == TranslationViewMode.Bookmarks;
     public int BookmarkedCount => _bookmarkedNodeIds.Count;
     public int EditableCount { get; private set; }
     public int TranslatedCount { get; private set; }
     public double CoveragePercent { get; private set; }
     public bool HasCoverage => EditableCount > 0;
     public string CoverageText => HasCoverage ? $"{TranslatedCount:N0}/{EditableCount:N0} · {CoveragePercent:0}%" : string.Empty;
+    public event EventHandler? PositionChanged;
 
     public override Task RefreshAsync(CancellationToken cancellationToken)
     {
@@ -390,12 +408,17 @@ public sealed class TranslationWorkspaceViewModel : WorkspaceViewModelBase, IDis
         Inspector.TranslationChanged -= OnTranslationChanged;
         _session.SnapshotChanged -= OnSnapshotChanged;
         _previewCancellation?.Cancel();
-        _previewCancellation?.Dispose();
+        if (_previewCancellation is not null)
+            _previewCleanupTask = DisposeCancellationAfterTaskAsync(_previewTask, _previewCancellation);
         _previewCancellation = null;
         if (_ownsImagePreviewService && _imagePreviewService is IDisposable disposable) disposable.Dispose();
     }
 
-    private void OnTranslationChanged(object? sender, EventArgs args) => UpdateSelectedPresentation();
+    private void OnTranslationChanged(object? sender, EventArgs args)
+    {
+        UpdateSelectedPresentation();
+        _session.ScheduleAutoSave();
+    }
 
     private void OnSnapshotChanged(object? sender, ProjectSnapshot? snapshot)
     {
@@ -428,6 +451,79 @@ public sealed class TranslationWorkspaceViewModel : WorkspaceViewModelBase, IDis
         AnchorItem = item;
         IsInspectorOpen = request.OpenInspector;
         if (request.FocusTarget == NavigationFocusTarget.TranslationEditor) Inspector.RequestFocus();
+        return true;
+    }
+
+    /// <summary>从书签投影回到完整剧情流，并选中原节点对应的源码行。</summary>
+    private void NavigateBookmarkToSource(ContentItem? item)
+    {
+        if (item?.Node is null || ViewMode != TranslationViewMode.Bookmarks) return;
+        var node = item.Node;
+        if (Navigate(new NavigateToSourceRequest(
+                node.Id,
+                node.Region.RelativePath,
+                node.Region.StartLine,
+                Label: null,
+                OpenInspector: true,
+                FocusTarget: NavigationFocusTarget.Inspector)))
+        {
+            _session.Tasks.StatusMessage = $"已从书签定位到原代码行：{node.Region.RelativePath}:{node.Region.StartLine}。";
+        }
+        else
+        {
+            _session.Tasks.StatusMessage = $"无法定位书签对应的原代码行：{node.Region.RelativePath}:{node.Region.StartLine}。";
+        }
+    }
+
+    /// <summary>恢复上次关闭应用时的投影、分组和条目位置。</summary>
+    public bool RestorePosition(SavedTranslationPosition? saved)
+    {
+        if (saved is null) return false;
+
+        var mode = Enum.TryParse<TranslationViewMode>(saved.ViewMode, ignoreCase: true, out var parsedMode)
+            ? parsedMode
+            : TranslationViewMode.Flow;
+        // 书签只保存在当前会话中，若上次状态没有可用书签则回退到剧情流。
+        if (mode == TranslationViewMode.Bookmarks && _bookmarkedNodeIds.Count == 0) mode = TranslationViewMode.Flow;
+        var grouping = Enum.TryParse<FlowGroupingMode>(saved.GroupingMode, ignoreCase: true, out var parsedGrouping)
+            ? parsedGrouping
+            : FlowGroupingMode.StoryPath;
+
+        _viewMode = mode;
+        _groupingMode = grouping;
+        OnPropertyChanged(nameof(ViewMode));
+        OnPropertyChanged(nameof(GroupingMode));
+        OnPropertyChanged(nameof(NavigationHeading));
+        OnPropertyChanged(nameof(ViewTitle));
+        OnPropertyChanged(nameof(IsBookmarkView));
+        NavigateBookmarkCommand.NotifyCanExecuteChanged();
+        RebuildNavigation();
+        RebuildProjection(saved.ItemId);
+
+        ContentItem? restored = saved.ItemId is null ? null : VisibleItems.FirstOrDefault(x => x.Key == saved.ItemId);
+        if (restored is null && mode != TranslationViewMode.Flow)
+        {
+            _viewMode = TranslationViewMode.Flow;
+            OnPropertyChanged(nameof(ViewMode));
+            OnPropertyChanged(nameof(ViewTitle));
+            OnPropertyChanged(nameof(IsBookmarkView));
+            NavigateBookmarkCommand.NotifyCanExecuteChanged();
+            RebuildNavigation();
+            RebuildProjection(saved.ItemId);
+            restored = VisibleItems.FirstOrDefault(x => x.Key == saved.ItemId);
+        }
+
+        if (restored is null)
+        {
+            _session.Tasks.StatusMessage = saved.ItemId is null
+                ? "已恢复上次浏览视图。"
+                : "上次访问位置已不存在，已恢复到当前剧情流。";
+            return false;
+        }
+
+        SelectedItem = restored;
+        AnchorItem = restored;
+        _session.Tasks.StatusMessage = $"已恢复上次访问位置：{restored.Subtitle}。";
         return true;
     }
 
@@ -565,16 +661,21 @@ public sealed class TranslationWorkspaceViewModel : WorkspaceViewModelBase, IDis
     {
         if (item?.Node is null) return;
         var nodeId = item.Node.Id;
-        var bookmarked = !_bookmarkedNodeIds.Add(nodeId);
-        if (bookmarked) _bookmarkedNodeIds.Remove(nodeId);
+        var bookmarked = ToggleBookmarkState(_bookmarkedNodeIds, nodeId);
         item.SetBookmarked(bookmarked);
         OnPropertyChanged(nameof(BookmarkedCount));
         if (ViewMode == TranslationViewMode.Bookmarks)
         {
-            RebuildNavigation();
             RebuildProjection(item.Key);
         }
-        _session.Tasks.StatusMessage = bookmarked ? "已移除书签。" : "已添加书签。";
+        _session.Tasks.StatusMessage = bookmarked ? "已添加书签。" : "已移除书签。";
+    }
+
+    internal static bool ToggleBookmarkState(HashSet<string> bookmarks, string nodeId)
+    {
+        if (bookmarks.Add(nodeId)) return true;
+        bookmarks.Remove(nodeId);
+        return false;
     }
 
     private void MoveEditable(int direction)
@@ -711,11 +812,22 @@ public sealed class TranslationWorkspaceViewModel : WorkspaceViewModelBase, IDis
 
     private void StartImagePreviewUpdate(ContentItem? item)
     {
-        _previewCancellation?.Cancel();
-        _previewCancellation?.Dispose();
+        var previousCancellation = _previewCancellation;
+        var previousTask = _previewTask;
         _previewCancellation = new CancellationTokenSource();
         var version = Interlocked.Increment(ref _previewVersion);
-        _ = UpdateImagePreviewAsync(item, version, _previewCancellation.Token);
+        _previewTask = UpdateImagePreviewAsync(item, version, _previewCancellation.Token);
+        if (previousCancellation is not null)
+        {
+            previousCancellation.Cancel();
+            _previewCleanupTask = DisposeCancellationAfterTaskAsync(previousTask, previousCancellation);
+        }
+    }
+
+    private static async Task DisposeCancellationAfterTaskAsync(Task task, CancellationTokenSource cancellation)
+    {
+        try { await task; }
+        finally { cancellation.Dispose(); }
     }
 
     private async Task UpdateImagePreviewAsync(ContentItem? item, long version, CancellationToken cancellationToken)
@@ -746,6 +858,15 @@ public sealed class TranslationWorkspaceViewModel : WorkspaceViewModelBase, IDis
         {
             if (version == Volatile.Read(ref _previewVersion))
                 _session.Tasks.StatusMessage = $"图片预览不可用：{exception.Message}";
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            // 预览属于非阻断功能，但后台异常必须被观察并进入任务日志。
+            if (version == Volatile.Read(ref _previewVersion))
+            {
+                _session.Tasks.StatusMessage = $"图片预览失败：{exception.Message}";
+                _session.Tasks.Logs.Add(new ToolLogEntry(_session.Tasks.StatusMessage, "Error"));
+            }
         }
     }
 }

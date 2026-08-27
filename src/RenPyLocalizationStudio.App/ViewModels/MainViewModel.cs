@@ -4,6 +4,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using CommunityToolkit.Mvvm.Messaging;
 using RenPyLocalizationStudio.App.Services;
+using RenPyLocalizationStudio.Core;
 
 namespace RenPyLocalizationStudio.App.ViewModels;
 
@@ -16,6 +17,8 @@ public sealed class MainViewModel : ObservableObject, IRecipient<NavigateToSourc
     private WorkspaceViewModelBase? _currentWorkspace;
     private string _accentColor;
     private Brush _accentPreviewBrush;
+    private string? _restoredPositionKey;
+    private Task? _shutdownTask;
 
     public MainViewModel(
         ProjectSessionViewModel session,
@@ -45,6 +48,8 @@ public sealed class MainViewModel : ObservableObject, IRecipient<NavigateToSourc
         MoveNextTranslationCommand = translation.MoveNextCommand;
         messenger.Register(this);
         session.PropertyChanged += OnSessionPropertyChanged;
+        session.SnapshotChanged += OnSessionSnapshotChanged;
+        translation.PositionChanged += OnTranslationPositionChanged;
     }
 
     public ProjectSessionViewModel Session { get; }
@@ -97,14 +102,64 @@ public sealed class MainViewModel : ObservableObject, IRecipient<NavigateToSourc
         if (_disposed) return;
         _disposed = true;
         Session.PropertyChanged -= OnSessionPropertyChanged;
+        Session.SnapshotChanged -= OnSessionSnapshotChanged;
+        TranslationWorkspace.PositionChanged -= OnTranslationPositionChanged;
         _messenger.UnregisterAll(this);
         TranslationWorkspace.Dispose();
         _taskCoordinator.Dispose();
     }
 
+    /// <summary>在窗口真正关闭前冲刷自动保存和最后访问位置，避免同步等待 UI 死锁。</summary>
+    public Task ShutdownAsync(CancellationToken cancellationToken = default) =>
+        _shutdownTask ??= ShutdownCoreAsync(cancellationToken);
+
     private void OnSessionPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs args)
     {
         if (args.PropertyName == nameof(ProjectSessionViewModel.ProjectName)) OnPropertyChanged(nameof(WindowTitle));
+        if (args.PropertyName is nameof(ProjectSessionViewModel.ProjectPath) or nameof(ProjectSessionViewModel.Language))
+        {
+            _restoredPositionKey = null;
+        }
+        if (args.PropertyName == nameof(ProjectSessionViewModel.AutoSaveEnabled) &&
+            !string.IsNullOrWhiteSpace(Session.ProjectPath))
+            ScheduleSettingsPersistence();
+    }
+
+    private void OnSessionSnapshotChanged(object? sender, ProjectSnapshot? snapshot)
+    {
+        if (snapshot is null) return;
+        var key = $"{Session.ProjectPath}\u001f{Session.Language}";
+        if (string.Equals(_restoredPositionKey, key, StringComparison.OrdinalIgnoreCase)) return;
+        _restoredPositionKey = key;
+        TranslationWorkspace.RestorePosition(Session.LastTranslationPosition);
+    }
+
+    private void OnTranslationPositionChanged(object? sender, EventArgs args)
+    {
+        Session.UpdateLastTranslationPosition(
+            TranslationWorkspace.SelectedItem?.Key ?? TranslationWorkspace.ScrollAnchor?.ItemId,
+            TranslationWorkspace.ViewMode.ToString(),
+            TranslationWorkspace.GroupingMode.ToString());
+        ScheduleSettingsPersistence();
+    }
+
+    private void ScheduleSettingsPersistence() =>
+        _taskCoordinator.StartLatestAfterDelay(
+            "settings-save",
+            TimeSpan.FromMilliseconds(180),
+            Session.PersistSettingsAsync);
+
+    private async Task ShutdownCoreAsync(CancellationToken cancellationToken)
+    {
+        if (Tasks.CancelCommand.CanExecute(null)) Tasks.CancelCommand.Execute(null);
+        Session.UpdateLastTranslationPosition(
+            TranslationWorkspace.SelectedItem?.Key ?? TranslationWorkspace.ScrollAnchor?.ItemId,
+            TranslationWorkspace.ViewMode.ToString(),
+            TranslationWorkspace.GroupingMode.ToString());
+        await _taskCoordinator.CancelAsync("settings-save");
+        await Session.FlushAutoSaveAsync(cancellationToken);
+        await Session.PersistSettingsAsync(cancellationToken);
+        await _taskCoordinator.CancelAsync("workspace-activation");
     }
 
     private static async Task ChangeWorkspaceAsync(WorkspaceViewModelBase? previous, WorkspaceViewModelBase current, CancellationToken cancellationToken)

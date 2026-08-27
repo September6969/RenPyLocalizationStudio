@@ -436,26 +436,49 @@ public sealed class ThemeService : IThemeService
         (byte)(source.B + (target.B - source.B) * amount));
 }
 
-public sealed record AppSettings(string? LastProject, string? LastLanguage, string AccentColor, string? SdkPath = null);
+/// <summary>
+/// 应用级会话设置。新增字段均带默认值，确保旧版本生成的 settings.json 仍可读取。
+/// </summary>
+public sealed record AppSettings(
+    string? LastProject,
+    string? LastLanguage,
+    string AccentColor,
+    string? SdkPath = null,
+    bool AutoSaveEnabled = true,
+    string? LastTranslationItemId = null,
+    string? LastTranslationViewMode = null,
+    string? LastTranslationGroupingMode = null);
 
 public sealed class AppSettingsStore
 {
     private readonly SemaphoreSlim _writeLock = new(1, 1);
-    private static string SettingsPath => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "RenPyLocalizationStudio", "settings.json");
-    private static string LegacySettingsPath => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "RenPyFlowTranslator", "settings.json");
+    private readonly string _settingsPath;
+    private readonly string _legacySettingsPath;
+
+    public AppSettingsStore() : this(
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "RenPyLocalizationStudio", "settings.json"),
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "RenPyFlowTranslator", "settings.json"))
+    {
+    }
+
+    internal AppSettingsStore(string settingsPath, string? legacySettingsPath = null)
+    {
+        _settingsPath = settingsPath;
+        _legacySettingsPath = legacySettingsPath ?? settingsPath;
+    }
 
     public async Task<AppSettings> LoadAsync(CancellationToken cancellationToken)
     {
         try
         {
-            var path = File.Exists(SettingsPath) ? SettingsPath : LegacySettingsPath;
+            var path = File.Exists(_settingsPath) ? _settingsPath : _legacySettingsPath;
             if (!File.Exists(path)) return new(null, null, "#D16BA5");
             await using var stream = File.OpenRead(path);
             return await JsonSerializer.DeserializeAsync<AppSettings>(stream, cancellationToken: cancellationToken) ?? new(null, null, "#D16BA5");
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
         }
         catch
         {
@@ -466,17 +489,17 @@ public sealed class AppSettingsStore
     public async Task SaveAsync(AppSettings settings, CancellationToken cancellationToken)
     {
         await _writeLock.WaitAsync(cancellationToken);
-        var temporaryPath = SettingsPath + $".{Guid.NewGuid():N}.tmp";
+        var temporaryPath = _settingsPath + $".{Guid.NewGuid():N}.tmp";
         try
         {
-            var directory = Path.GetDirectoryName(SettingsPath)!;
+            var directory = Path.GetDirectoryName(_settingsPath)!;
             Directory.CreateDirectory(directory);
             await using (var stream = new FileStream(temporaryPath, FileMode.CreateNew, FileAccess.Write, FileShare.None, 16384, FileOptions.Asynchronous))
             {
                 await JsonSerializer.SerializeAsync(stream, settings, new JsonSerializerOptions { WriteIndented = true }, cancellationToken);
                 await stream.FlushAsync(cancellationToken);
             }
-            File.Move(temporaryPath, SettingsPath, true);
+            File.Move(temporaryPath, _settingsPath, true);
         }
         finally
         {

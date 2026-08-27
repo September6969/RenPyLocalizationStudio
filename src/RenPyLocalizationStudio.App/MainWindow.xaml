@@ -7,7 +7,8 @@
         Background="{DynamicResource BackgroundLevel0}" Foreground="{DynamicResource TextPrimaryBrush}"
         BorderThickness="1" BorderBrush="{DynamicResource BackgroundLevel1}"
         FontFamily="Microsoft YaHei UI" TextOptions.TextFormattingMode="Display" UseLayoutRounding="True"
-        SizeChanged="OnWindowSizeChanged" StateChanged="OnWindowStateChanged" Closed="OnWindowClosed"
+        SizeChanged="OnWindowSizeChanged" StateChanged="OnWindowStateChanged"
+        Closing="OnWindowClosing" Closed="OnWindowClosed"
         PreviewKeyDown="OnWindowPreviewKeyDown">
     <shell:WindowChrome.WindowChrome>
         <shell:WindowChrome CaptionHeight="40" ResizeBorderThickness="6" CornerRadius="0"
@@ -73,6 +74,9 @@
                                 <Button Style="{StaticResource PresetColorButtonStyle}" Background="#E74C3C" Click="PresetColor_Click" Tag="#E74C3C" ToolTip="珊瑚红" />
                                 <Button Style="{StaticResource PresetColorButtonStyle}" Background="#F1C40F" Click="PresetColor_Click" Tag="#F1C40F" ToolTip="金黄" />
                             </WrapPanel>
+                            <CheckBox Content="编辑后自动保存" IsChecked="{Binding Session.AutoSaveEnabled, Mode=TwoWay}"
+                                      Foreground="{DynamicResource TextPrimaryBrush}" FontSize="12" Margin="0,2,0,12"
+                                      ToolTip="译文停止输入约 0.9 秒后自动写入，存在结构警告时需手动确认。" />
                             <Grid>
                                 <Grid.ColumnDefinitions><ColumnDefinition Width="24"/><ColumnDefinition Width="*"/><ColumnDefinition Width="32"/></Grid.ColumnDefinitions>
                                 <Border Width="16" Height="16" CornerRadius="3" Background="{Binding AccentPreviewBrush}"
@@ -146,7 +150,7 @@
             <ProgressBar Grid.Column="1" Height="3" VerticalAlignment="Bottom" BorderThickness="0" Background="Transparent"
                          Foreground="{DynamicResource BrandAccentBrush}" IsIndeterminate="{Binding Tasks.IsBusy}"
                          AutomationProperties.Name="当前任务进度" />
-            <TextBlock Grid.Column="2" Text="Alt+↑ / Alt+↓ 切换译文" Margin="12,0" VerticalAlignment="Center" FontSize="11"
+            <TextBlock Grid.Column="2" Text="Alt+↑ / Alt+↓ 切换译文 · Alt+← / Alt+→ 保留编辑器操作" Margin="12,0" VerticalAlignment="Center" FontSize="11"
                        Foreground="{DynamicResource TextSubtleBrush}" />
         </Grid>
     </Grid>

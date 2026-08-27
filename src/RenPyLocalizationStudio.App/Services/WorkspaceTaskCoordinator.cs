@@ -18,8 +18,25 @@ public sealed class WorkspaceTaskCoordinator : IDisposable
         return slot.ReplaceAsync(operation, _reportException);
     }
 
+    /// <summary>合并同一键的高频请求，并在安静期结束后只执行最后一次操作。</summary>
+    public Task RunLatestAfterDelayAsync(
+        string key,
+        TimeSpan delay,
+        Func<CancellationToken, Task> operation) =>
+        RunLatestAsync(key, async cancellationToken =>
+        {
+            await Task.Delay(delay, cancellationToken);
+            await operation(cancellationToken);
+        });
+
     public void StartLatest(string key, Func<CancellationToken, Task> operation) =>
         _ = RunLatestAsync(key, operation);
+
+    public void StartLatestAfterDelay(
+        string key,
+        TimeSpan delay,
+        Func<CancellationToken, Task> operation) =>
+        _ = RunLatestAfterDelayAsync(key, delay, operation);
 
     public async Task CancelAsync(string key)
     {
@@ -43,22 +60,33 @@ public sealed class WorkspaceTaskCoordinator : IDisposable
         public async Task ReplaceAsync(Func<CancellationToken, Task> operation, Action<Exception> reportException)
         {
             CancellationTokenSource cancellation;
-            await _gate.WaitAsync().ConfigureAwait(false);
+            Task running;
+            await _gate.WaitAsync();
             try
             {
                 _cancellation?.Cancel();
                 cancellation = new CancellationTokenSource();
                 _cancellation = cancellation;
-                _running = ObserveAsync(operation, cancellation.Token, reportException);
+                running = ObserveAsync(operation, cancellation.Token, reportException);
+                _running = running;
             }
             finally { _gate.Release(); }
-            await _running.ConfigureAwait(false);
+            // 必须等待本次请求自己的任务；否则并发替换后会错误等待后一个请求。
+            await running;
         }
 
         public async Task CancelAsync()
         {
-            _cancellation?.Cancel();
-            try { await _running.ConfigureAwait(false); }
+            Task running;
+            await _gate.WaitAsync();
+            try
+            {
+                _cancellation?.Cancel();
+                running = _running;
+            }
+            finally { _gate.Release(); }
+
+            try { await running; }
             catch (OperationCanceledException) { }
         }
 

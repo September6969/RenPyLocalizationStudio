@@ -27,6 +27,10 @@
                 </StackPanel>
                 <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
                     <Button Content="清除筛选" Command="{Binding Workspace.ClearSearchCommand}" Style="{StaticResource GhostButtonStyle}" Padding="12,6" />
+                    <Button Content="定位原代码" Command="{Binding Workspace.NavigateBookmarkCommand}"
+                            CommandParameter="{Binding Workspace.SelectedItem}" Style="{StaticResource GhostButtonStyle}"
+                            Padding="12,6" Margin="8,0,0,0" ToolTip="从书签回到原始剧情流中的代码行"
+                            Visibility="{Binding Workspace.IsBookmarkView, Converter={StaticResource BooleanToVisibilityConverter}}" />
                     <Button Content="打开检查器" Command="{Binding Workspace.ToggleInspectorCommand}" Style="{StaticResource GhostButtonStyle}" Padding="12,6" Margin="8,0,0,0" />
                 </StackPanel>
             </Grid>
@@ -46,7 +50,8 @@
             <!-- Upper: Flow List -->
             <ListView x:Name="FlowList" Grid.Row="0" ItemsSource="{Binding Workspace.VisibleItems}" SelectedItem="{Binding Workspace.SelectedItem}"
                       behaviors:ScrollAnchorBehavior.AnchorItem="{Binding Workspace.AnchorItem}"
-                      PreviewMouseLeftButtonUp="FlowList_PreviewMouseLeftButtonUp" PreviewMouseRightButtonDown="FlowList_PreviewMouseRightButtonDown"
+                      PreviewMouseLeftButtonUp="FlowList_PreviewMouseLeftButtonUp" PreviewMouseDoubleClick="FlowList_PreviewMouseDoubleClick"
+                      PreviewMouseRightButtonDown="FlowList_PreviewMouseRightButtonDown"
                       PreviewKeyDown="FlowList_PreviewKeyDown"
                       Background="Transparent" BorderThickness="0" ItemContainerStyle="{StaticResource ContentRowStyle}"
                       ScrollViewer.CanContentScroll="True"
@@ -56,20 +61,26 @@
                 <ListView.ItemTemplate>
                     <DataTemplate>
                         <Border x:Name="RowSurface" Background="Transparent" CornerRadius="6" Padding="12,8"
-                                Tag="{Binding DataContext.Workspace.ToggleBookmarkCommand, RelativeSource={RelativeSource AncestorType={x:Type ListView}}}">
+                                Tag="{Binding DataContext.Workspace, RelativeSource={RelativeSource AncestorType={x:Type ListView}}}">
                             <Border.ContextMenu>
                                 <ContextMenu DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
                                     <MenuItem Header="添加书签"
                                               Style="{StaticResource StudioMenuItemStyle}"
                                               Template="{StaticResource StudioMenuItemTemplate}"
                                               Visibility="{Binding IsBookmarked, Converter={StaticResource InverseBooleanToVisibilityConverter}}"
-                                              Command="{Binding PlacementTarget.Tag, RelativeSource={RelativeSource AncestorType={x:Type ContextMenu}}}"
+                                              Command="{Binding PlacementTarget.Tag.ToggleBookmarkCommand, RelativeSource={RelativeSource AncestorType={x:Type ContextMenu}}}"
                                               CommandParameter="{Binding}" />
                                     <MenuItem Header="移除书签"
                                               Style="{StaticResource StudioMenuItemStyle}"
                                               Template="{StaticResource StudioMenuItemTemplate}"
                                               Visibility="{Binding IsBookmarked, Converter={StaticResource BooleanToVisibilityConverter}}"
-                                              Command="{Binding PlacementTarget.Tag, RelativeSource={RelativeSource AncestorType={x:Type ContextMenu}}}"
+                                              Command="{Binding PlacementTarget.Tag.ToggleBookmarkCommand, RelativeSource={RelativeSource AncestorType={x:Type ContextMenu}}}"
+                                              CommandParameter="{Binding}" />
+                                    <MenuItem Header="跳转到原代码行"
+                                              Style="{StaticResource StudioMenuItemStyle}"
+                                              Template="{StaticResource StudioMenuItemTemplate}"
+                                              Visibility="{Binding PlacementTarget.Tag.IsBookmarkView, RelativeSource={RelativeSource AncestorType={x:Type ContextMenu}}, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                              Command="{Binding PlacementTarget.Tag.NavigateBookmarkCommand, RelativeSource={RelativeSource AncestorType={x:Type ContextMenu}}}"
                                               CommandParameter="{Binding}" />
                                 </ContextMenu>
                             </Border.ContextMenu>
