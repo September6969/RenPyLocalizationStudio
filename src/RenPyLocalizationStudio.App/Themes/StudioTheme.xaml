@@ -41,7 +41,18 @@
         <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
     </Style>
 
-    <!-- 右键菜单使用深色工作台表面，避免回退到白色系统菜单模板。 -->
+    <!-- 右键菜单使用显式模板，移除系统模板自带的白色图标/检查列。 -->
+    <ControlTemplate x:Key="StudioContextMenuTemplate" TargetType="ContextMenu">
+        <Border Background="{TemplateBinding Background}"
+                BorderBrush="{TemplateBinding BorderBrush}"
+                BorderThickness="{TemplateBinding BorderThickness}"
+                Padding="{TemplateBinding Padding}"
+                CornerRadius="4"
+                SnapsToDevicePixels="True">
+            <ItemsPresenter KeyboardNavigation.DirectionalNavigation="Cycle" />
+        </Border>
+    </ControlTemplate>
+
     <Style TargetType="ContextMenu">
         <Setter Property="Background" Value="{DynamicResource BackgroundLevel2}" />
         <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
@@ -49,33 +60,39 @@
         <Setter Property="BorderThickness" Value="1" />
         <Setter Property="Padding" Value="4" />
         <Setter Property="MinWidth" Value="128" />
+        <Setter Property="OverridesDefaultStyle" Value="True" />
+        <Setter Property="Template" Value="{StaticResource StudioContextMenuTemplate}" />
     </Style>
 
-    <Style TargetType="MenuItem">
+    <ControlTemplate x:Key="StudioMenuItemTemplate" TargetType="MenuItem">
+        <Border x:Name="Surface" Background="{TemplateBinding Background}" CornerRadius="3"
+                Padding="{TemplateBinding Padding}">
+            <ContentPresenter ContentSource="Header" RecognizesAccessKey="True"
+                              TextElement.Foreground="{TemplateBinding Foreground}"
+                              HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                              VerticalAlignment="{TemplateBinding VerticalContentAlignment}" />
+        </Border>
+        <ControlTemplate.Triggers>
+            <Trigger Property="IsHighlighted" Value="True">
+                <Setter TargetName="Surface" Property="Background" Value="{DynamicResource BrandAccentSoftBrush}" />
+                <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
+            </Trigger>
+            <Trigger Property="IsEnabled" Value="False">
+                <Setter TargetName="Surface" Property="Opacity" Value="0.42" />
+            </Trigger>
+        </ControlTemplate.Triggers>
+    </ControlTemplate>
+
+    <Style x:Key="StudioMenuItemStyle" TargetType="MenuItem">
         <Setter Property="Background" Value="Transparent" />
         <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
         <Setter Property="Padding" Value="10,6" />
         <Setter Property="HorizontalContentAlignment" Value="Left" />
-        <Setter Property="Template">
-            <Setter.Value>
-                <ControlTemplate TargetType="MenuItem">
-                    <Border x:Name="Surface" Background="{TemplateBinding Background}" CornerRadius="3"
-                            Padding="{TemplateBinding Padding}">
-                        <ContentPresenter ContentSource="Header" RecognizesAccessKey="True" />
-                    </Border>
-                    <ControlTemplate.Triggers>
-                        <Trigger Property="IsHighlighted" Value="True">
-                            <Setter TargetName="Surface" Property="Background" Value="{DynamicResource BrandAccentSoftBrush}" />
-                            <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
-                        </Trigger>
-                        <Trigger Property="IsEnabled" Value="False">
-                            <Setter TargetName="Surface" Property="Opacity" Value="0.42" />
-                        </Trigger>
-                    </ControlTemplate.Triggers>
-                </ControlTemplate>
-            </Setter.Value>
-        </Setter>
+        <Setter Property="OverridesDefaultStyle" Value="True" />
+        <Setter Property="Template" Value="{StaticResource StudioMenuItemTemplate}" />
     </Style>
+
+    <Style TargetType="MenuItem" BasedOn="{StaticResource StudioMenuItemStyle}" />
 
     <Style x:Key="GhostButtonStyle" TargetType="Button">
         <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}" />

@@ -1,6 +1,6 @@
 # RenPy Localization Studio
 
-当前版本：**v0.3.4**。
+当前版本：**v0.3.5**。
 
 RenPy Localization Studio 是一个面向 Ren’Py 人工本地化流程的 Windows 桌面工作台。它把 tl 生成、剧情流翻译、额外文本、替换规则、`zzz.rpy` 补丁以及解包/反编译安全服务收敛到同一项目界面。
 
@@ -21,6 +21,7 @@ RenPy Localization Studio 是一个面向 Ren’Py 人工本地化流程的 Wind
 - 通过本机 Ren’Py SDK 预检或增量生成 tl，后台捕获日志并支持取消。
 - 按剧情路径、源文件或 label 浏览同一流程图。
 - 可在代码行右键添加/移除书签，并通过“书签”选项卡快速筛选和定位；书签仅保存在当前会话中。
+- `Alt+↓` 遇到可解析的 `jump` 时会跟随目标 label，直接进入目标分支的下一条可编辑译文。
 - 扫描 Character、screen、input、notify、define/default 等额外文本，人工确认后写入受管补丁。
 - 校验精确 replace 规则，并使用受管区块生成 `zzz.rpy`。
 - 解包/反编译服务强制项目内路径、冲突跳过和源文件保留策略。

@@ -579,20 +579,66 @@ public sealed class TranslationWorkspaceViewModel : WorkspaceViewModelBase, IDis
 
     private void MoveEditable(int direction)
     {
-        var index = SelectedItem is null ? (direction > 0 ? 0 : VisibleItems.Count - 1) : VisibleItems.IndexOf(SelectedItem) + direction;
+        var selectedIndex = SelectedItem is null ? -1 : VisibleItems.IndexOf(SelectedItem);
+        var index = selectedIndex < 0
+            ? (direction > 0 ? 0 : VisibleItems.Count - 1)
+            : selectedIndex + direction;
+        // 手动选中 jump 行后按 Alt+↓ 也应沿目标 label 继续，而不是跳过该转移。
+        if (direction > 0 && selectedIndex >= 0 && VisibleItems[selectedIndex].Node?.Kind == FlowNodeKind.Jump)
+            index = selectedIndex;
+
+        var followedLabel = string.Empty;
+        var visitedJumps = new HashSet<string>(StringComparer.Ordinal);
         while (index >= 0 && index < VisibleItems.Count)
         {
-            if (VisibleItems[index].IsEditable)
+            var item = VisibleItems[index];
+            if (direction > 0 && item.Node?.Kind == FlowNodeKind.Jump &&
+                visitedJumps.Add(item.Node.Id) &&
+                TryResolveJumpTargetIndex(VisibleItems, _session.Snapshot?.Graph, index, out var targetIndex, out var targetLabel))
             {
-                SelectedItem = VisibleItems[index];
+                index = targetIndex;
+                followedLabel = targetLabel;
+                continue;
+            }
+
+            if (item.IsEditable)
+            {
+                SelectedItem = item;
                 AnchorItem = SelectedItem;
                 Inspector.RequestFocus();
-                _session.Tasks.StatusMessage = direction > 0 ? "已切换到下一条可编辑译文。" : "已切换到上一条可编辑译文。";
+                _session.Tasks.StatusMessage = followedLabel.Length == 0
+                    ? direction > 0 ? "已切换到下一条可编辑译文。" : "已切换到上一条可编辑译文。"
+                    : $"已沿 jump 跳转到 label {followedLabel}，并切换到下一条可编辑译文。";
                 return;
             }
             index += direction;
         }
         _session.Tasks.StatusMessage = direction > 0 ? "已经是最后一条可编辑译文。" : "已经是第一条可编辑译文。";
+    }
+
+    internal static bool TryResolveJumpTargetIndex(
+        IReadOnlyList<ContentItem> visibleItems,
+        FlowGraph? graph,
+        int jumpIndex,
+        out int targetIndex,
+        out string targetLabel)
+    {
+        targetIndex = -1;
+        targetLabel = string.Empty;
+        if (graph is null || jumpIndex < 0 || jumpIndex >= visibleItems.Count) return false;
+        var jump = visibleItems[jumpIndex].Node;
+        if (jump?.Kind != FlowNodeKind.Jump || string.IsNullOrWhiteSpace(jump.Target) ||
+            !graph.Labels.TryGetValue(jump.Target, out var label)) return false;
+
+        for (var index = 0; index < visibleItems.Count; index++)
+        {
+            if (visibleItems[index].Node?.Id != label.Id) continue;
+            targetIndex = index;
+            targetLabel = jump.Target;
+            return true;
+        }
+
+        return false;
     }
 
     private void UpdateInspector(ContentItem? item)

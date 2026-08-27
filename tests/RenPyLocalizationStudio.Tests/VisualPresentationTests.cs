@@ -117,6 +117,43 @@ public sealed class VisualPresentationTests
     }
 
     [Fact]
+    public void TranslationNavigation_向下遇到Jump时定位目标Label()
+    {
+        var jump = new FlowNode
+        {
+            Id = "jump",
+            Kind = FlowNodeKind.Jump,
+            DisplayText = "jump target",
+            Target = "target",
+            Region = new SourceRegion("game/a.rpy", 3, 3),
+            Indent = 0
+        };
+        var target = new FlowNode
+        {
+            Id = "target",
+            Kind = FlowNodeKind.Label,
+            LabelName = "target",
+            DisplayText = "label target",
+            Region = new SourceRegion("game/a.rpy", 8, 8),
+            Indent = 0
+        };
+        var items = new[]
+        {
+            ContentItem.FromFlow(jump, null, null, 0),
+            ContentItem.FromFlow(target, null, null, 0)
+        };
+        var graph = new FlowGraph();
+        graph.Nodes.AddRange([jump, target]);
+        graph.Labels["target"] = target;
+
+        var resolved = TranslationWorkspaceViewModel.TryResolveJumpTargetIndex(items, graph, 0, out var targetIndex, out var targetLabel);
+
+        Assert.True(resolved);
+        Assert.Equal(1, targetIndex);
+        Assert.Equal("target", targetLabel);
+    }
+
+    [Fact]
     public void ContentItem_分离说话人与正文并隐藏正常绑定状态()
     {
         var node = DialogueNode("uv", "正文: 保留冒号");

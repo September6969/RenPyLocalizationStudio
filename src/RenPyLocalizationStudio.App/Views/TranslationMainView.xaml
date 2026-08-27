@@ -60,33 +60,17 @@
                             <Border.ContextMenu>
                                 <ContextMenu DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
                                     <MenuItem Header="添加书签"
+                                              Style="{StaticResource StudioMenuItemStyle}"
+                                              Template="{StaticResource StudioMenuItemTemplate}"
+                                              Visibility="{Binding IsBookmarked, Converter={StaticResource InverseBooleanToVisibilityConverter}}"
                                               Command="{Binding PlacementTarget.Tag, RelativeSource={RelativeSource AncestorType={x:Type ContextMenu}}}"
-                                              CommandParameter="{Binding}">
-                                        <MenuItem.Style>
-                                            <Style TargetType="MenuItem">
-                                                <Setter Property="Visibility" Value="Visible" />
-                                                <Style.Triggers>
-                                                    <DataTrigger Binding="{Binding IsBookmarked}" Value="True">
-                                                        <Setter Property="Visibility" Value="Collapsed" />
-                                                    </DataTrigger>
-                                                </Style.Triggers>
-                                            </Style>
-                                        </MenuItem.Style>
-                                    </MenuItem>
+                                              CommandParameter="{Binding}" />
                                     <MenuItem Header="移除书签"
+                                              Style="{StaticResource StudioMenuItemStyle}"
+                                              Template="{StaticResource StudioMenuItemTemplate}"
+                                              Visibility="{Binding IsBookmarked, Converter={StaticResource BooleanToVisibilityConverter}}"
                                               Command="{Binding PlacementTarget.Tag, RelativeSource={RelativeSource AncestorType={x:Type ContextMenu}}}"
-                                              CommandParameter="{Binding}">
-                                        <MenuItem.Style>
-                                            <Style TargetType="MenuItem">
-                                                <Setter Property="Visibility" Value="Collapsed" />
-                                                <Style.Triggers>
-                                                    <DataTrigger Binding="{Binding IsBookmarked}" Value="True">
-                                                        <Setter Property="Visibility" Value="Visible" />
-                                                    </DataTrigger>
-                                                </Style.Triggers>
-                                            </Style>
-                                        </MenuItem.Style>
-                                    </MenuItem>
+                                              CommandParameter="{Binding}" />
                                 </ContextMenu>
                             </Border.ContextMenu>
                             <Grid>
