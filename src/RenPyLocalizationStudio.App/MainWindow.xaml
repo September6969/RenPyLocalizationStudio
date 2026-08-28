@@ -27,7 +27,8 @@
                 <ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/>
             </Grid.ColumnDefinitions>
             <StackPanel Orientation="Horizontal" Margin="14,0,18,0" VerticalAlignment="Center">
-                <TextBlock Text="RLS" Foreground="{DynamicResource BrandAccentBrush}" FontWeight="Bold" Margin="0,0,10,0" />
+                <Image Width="18" Height="18" Margin="0,0,10,0" Source="/Assets/renpy-localization-studio-mark.png"
+                       ToolTip="RenPy Localization Studio" />
                 <TextBlock x:Name="FullProductName" Text="RenPy Localization Studio" FontWeight="SemiBold" />
             </StackPanel>
             <Grid Grid.Column="1" Margin="10,4,16,4" shell:WindowChrome.IsHitTestVisibleInChrome="True">

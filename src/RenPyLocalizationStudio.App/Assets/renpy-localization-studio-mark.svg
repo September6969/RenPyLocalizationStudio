@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-labelledby="title description">
+  <title id="title">RenPy Localization Studio 樱花节点图标</title>
+  <desc id="description">由五个花瓣节点和三个剧情分支构成的抽象樱花。</desc>
+  <rect x="12" y="12" width="232" height="232" rx="58" fill="#0D1117"/>
+  <rect x="14" y="14" width="228" height="228" rx="56" fill="none" stroke="#30363D" stroke-width="4"/>
+  <g fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M128 128L128 58" stroke="#D16BA5" stroke-width="12"/>
+    <path d="M128 128L189 164" stroke="#D16BA5" stroke-width="12"/>
+    <path d="M128 128L67 164" stroke="#D16BA5" stroke-width="12"/>
+    <path d="M128 128L190 95" stroke="#8B949E" stroke-width="8"/>
+    <path d="M128 128L66 95" stroke="#8B949E" stroke-width="8"/>
+  </g>
+  <g>
+    <circle cx="128" cy="55" r="22" fill="#EBA8CB"/>
+    <circle cx="194" cy="92" r="19" fill="#C9D1D9"/>
+    <circle cx="194" cy="167" r="22" fill="#EBA8CB"/>
+    <circle cx="62" cy="167" r="22" fill="#EBA8CB"/>
+    <circle cx="62" cy="92" r="19" fill="#C9D1D9"/>
+    <circle cx="128" cy="128" r="27" fill="#D16BA5"/>
+    <path d="M116 128h24M128 116v24" stroke="#0D1117" stroke-width="7" stroke-linecap="round"/>
+  </g>
+</svg>

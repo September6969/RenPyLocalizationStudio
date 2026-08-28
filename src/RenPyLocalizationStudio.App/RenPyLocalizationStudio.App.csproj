@@ -22,6 +22,7 @@
     <UseWPF>true</UseWPF>
     <AssemblyName>RenPyLocalizationStudio</AssemblyName>
     <RootNamespace>RenPyLocalizationStudio.App</RootNamespace>
+    <ApplicationIcon>Assets\RenPyLocalizationStudio.ico</ApplicationIcon>
     <!-- 默认采用框架依赖发布：目标电脑需安装 .NET 10 Desktop Runtime。 -->
     <PublishSingleFile>false</PublishSingleFile>
     <SelfContained>false</SelfContained>
@@ -39,6 +40,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Resource Include="Assets\renpy-localization-studio-mark.png" />
     <None Include="..\..\README.md" Link="README.md" CopyToPublishDirectory="PreserveNewest" />
     <None Include="..\..\THIRD-PARTY-NOTICES.md" Link="THIRD-PARTY-NOTICES.md" CopyToPublishDirectory="PreserveNewest" />
     <None Include="..\..\licenses\**\*" Link="licenses\%(RecursiveDir)%(Filename)%(Extension)" CopyToPublishDirectory="PreserveNewest" />
