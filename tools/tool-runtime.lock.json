@@ -2,10 +2,10 @@
   "schemaVersion": 1,
   "components": {
     "python": {
-      "version": "3.13.7",
-      "url": "https://www.python.org/ftp/python/3.13.7/python-3.13.7-embed-amd64.zip",
-      "fileName": "python-3.13.7-embed-amd64.zip",
-      "sha256": "F6CCA216A359BE84797CABB54149CE5E062AFB16CC7567EB7FC51CACB2D86B65"
+      "version": "3.13.15",
+      "url": "https://www.python.org/ftp/python/3.13.15/python-3.13.15-embed-amd64.zip",
+      "fileName": "python-3.13.15-embed-amd64.zip",
+      "sha256": "D1F04D990AEE1253D8569E8E5104E30FA9F5FA830899F14843448872D936A2CF"
     },
     "unrpyc": {
       "version": "2.0.4",

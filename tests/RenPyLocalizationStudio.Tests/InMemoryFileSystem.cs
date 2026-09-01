@@ -14,6 +14,7 @@ internal sealed class InMemoryFileSystem : IFileSystemService
     public InMemoryFileSystem(string root = "C:\\project") => _root = Path.GetFullPath(root).TrimEnd('\\');
 
     public int WriteCount { get; private set; }
+    public Action? BeforeAtomicWrite { get; set; }
 
     public void AddText(string relativePath, string text, bool bom = false, string newLine = "\n")
     {
@@ -37,7 +38,8 @@ internal sealed class InMemoryFileSystem : IFileSystemService
         }
 
         var full = Path.GetFullPath(Path.Combine(root.FullPath, relativePath));
-        if (!full.StartsWith(root.FullPath + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+        if (!full.Equals(root.FullPath, StringComparison.OrdinalIgnoreCase) &&
+            !full.StartsWith(root.FullPath + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
         {
             return OperationResult<ValidatedProjectPath>.Failure(Error("PATH_TRAVERSAL", relativePath));
         }
@@ -50,6 +52,9 @@ internal sealed class InMemoryFileSystem : IFileSystemService
         path.Equals("C:\\tools\\renpy.exe", StringComparison.OrdinalIgnoreCase)
             ? OperationResult<ValidatedExecutablePath>.Success(new ValidatedExecutablePath(path))
             : OperationResult<ValidatedExecutablePath>.Failure(Error("EXECUTABLE_NOT_FOUND", path));
+
+    public OperationResult<ValidatedToolPath> ValidateToolPath(string path) =>
+        OperationResult<ValidatedToolPath>.Success(new ValidatedToolPath(path, Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(path)))));
 
     public Task<OperationResult<Utf8TextFile>> ReadUtf8Async(ValidatedProjectPath path, CancellationToken cancellationToken)
     {
@@ -96,6 +101,11 @@ internal sealed class InMemoryFileSystem : IFileSystemService
             new BinaryFileContent(bytes.ToArray(), Convert.ToHexString(SHA256.HashData(bytes)))));
     }
 
+    public Task<OperationResult<bool>> ExistsAsync(ValidatedProjectPath path, CancellationToken cancellationToken) =>
+        Task.FromResult(cancellationToken.IsCancellationRequested
+            ? OperationResult<bool>.Cancelled(Error("OPERATION_CANCELLED", path.RelativePath))
+            : OperationResult<bool>.Success(_files.ContainsKey(Normalize(path.RelativePath))));
+
     public Task<OperationResult<AtomicWriteSummary>> AtomicWriteAsync(
         AtomicWriteRequest request,
         IProgress<ToolOperationProgress> progress,
@@ -107,8 +117,13 @@ internal sealed class InMemoryFileSystem : IFileSystemService
         }
 
         var key = Normalize(request.Target.RelativePath);
-        if (request.ExpectedSha256 is not null && _files.TryGetValue(key, out var current) &&
-            !Convert.ToHexString(SHA256.HashData(current)).Equals(request.ExpectedSha256, StringComparison.OrdinalIgnoreCase))
+        BeforeAtomicWrite?.Invoke();
+        if (request.RequireTargetMissing && _files.ContainsKey(key))
+        {
+            return Task.FromResult(OperationResult<AtomicWriteSummary>.Failure(Error("TARGET_ALREADY_EXISTS", key)));
+        }
+        if (request.ExpectedSha256 is not null && (!_files.TryGetValue(key, out var current) ||
+            !Convert.ToHexString(SHA256.HashData(current)).Equals(request.ExpectedSha256, StringComparison.OrdinalIgnoreCase)))
         {
             return Task.FromResult(OperationResult<AtomicWriteSummary>.Failure(Error("EXTERNAL_MODIFICATION", key)));
         }
@@ -136,7 +151,8 @@ internal sealed class InMemoryFileSystem : IFileSystemService
             return Task.FromResult(OperationResult<IReadOnlyList<ValidatedProjectPath>>.Cancelled(Error("OPERATION_CANCELLED", relativeDirectory)));
         }
 
-        var prefix = Normalize(relativeDirectory).TrimEnd('/') + "/";
+        var normalizedDirectory = Normalize(relativeDirectory).TrimEnd('/');
+        var prefix = normalizedDirectory.Length == 0 ? string.Empty : normalizedDirectory + "/";
         var extension = searchPattern.StartsWith("*.", StringComparison.Ordinal) ? searchPattern[1..] : null;
         var values = _files.Keys
             .Where(path => path.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
@@ -156,7 +172,8 @@ internal sealed class InMemoryFileSystem : IFileSystemService
             return Task.FromResult(OperationResult<IReadOnlyList<string>>.Cancelled(Error("OPERATION_CANCELLED", relativeDirectory)));
         }
 
-        var prefix = Normalize(relativeDirectory).TrimEnd('/') + "/";
+        var normalizedDirectory = Normalize(relativeDirectory).TrimEnd('/');
+        var prefix = normalizedDirectory.Length == 0 ? string.Empty : normalizedDirectory + "/";
         var values = _files.Keys.Where(path => path.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
             .Select(path => path[prefix.Length..].Split('/')[0])
             .Where(value => value.Length > 0)

@@ -52,6 +52,7 @@ public sealed class ProjectAnalyzer
         }
 
         MergeGraphs(snapshot);
+        DiagnoseDuplicateDialogueIdentifiers(snapshot);
         BindTranslations(snapshot);
         foreach (var diagnostic in snapshot.Sources.SelectMany(source => source.Diagnostics)
                      .Concat(snapshot.TlDocuments.SelectMany(document => document.Diagnostics)))
@@ -62,12 +63,35 @@ public sealed class ProjectAnalyzer
         return snapshot;
     }
 
+    private static void DiagnoseDuplicateDialogueIdentifiers(ProjectSnapshot snapshot)
+    {
+        foreach (var group in snapshot.TranslationUnits
+                     .Where(unit => unit.Kind == TranslationUnitKind.Dialogue && !string.IsNullOrWhiteSpace(unit.Identifier))
+                     .GroupBy(unit => unit.Identifier!, StringComparer.Ordinal)
+                     .Where(group => group.Count() > 1))
+        {
+            foreach (var unit in group)
+            {
+                snapshot.Diagnostics.Add(new Diagnostic(
+                    DiagnosticSeverity.Error,
+                    "DUPLICATE_DIALOGUE_ID",
+                    $"dialogue 翻译 ID {group.Key} 存在重复定义，保存前必须修复。",
+                    unit.RelativeTlPath,
+                    unit.HeaderLine,
+                    DiagnosticCategory.Parsing,
+                    "请在 Ren’Py 源码或 tl 文件中消除重复 translate ID。"));
+            }
+        }
+    }
+
     private static void MergeGraphs(ProjectSnapshot snapshot)
     {
         foreach (var source in snapshot.Sources)
         {
             snapshot.Graph.Nodes.AddRange(source.Graph.Nodes);
             snapshot.Graph.Edges.AddRange(source.Graph.Edges);
+            foreach (var continuation in source.Graph.CallContinuations)
+                snapshot.Graph.CallContinuations[continuation.Key] = continuation.Value;
             foreach (var (name, node) in source.Graph.Labels)
             {
                 if (!snapshot.Graph.Labels.TryAdd(name, node))
@@ -103,6 +127,32 @@ public sealed class ProjectAnalyzer
                     node.Region.StartLine));
             }
         }
+
+
+        var nodesById = snapshot.Graph.Nodes.ToDictionary(node => node.Id, StringComparer.Ordinal);
+        foreach (var (callId, continuationId) in snapshot.Graph.CallContinuations)
+        {
+            if (!nodesById.TryGetValue(callId, out var call) || call.Target is null ||
+                !snapshot.Graph.Labels.TryGetValue(call.Target, out var targetLabel)) continue;
+
+            foreach (var returnNode in snapshot.Graph.Nodes.Where(node =>
+                         node.Kind == FlowNodeKind.Return && IsDescendantOf(node, targetLabel.Id, nodesById)))
+            {
+                if (existing.Add((returnNode.Id, continuationId, FlowEdgeKind.Return)))
+                    snapshot.Graph.Edges.Add(new FlowEdge(returnNode.Id, continuationId, FlowEdgeKind.Return));
+            }
+        }
+    }
+
+    private static bool IsDescendantOf(FlowNode node, string ancestorId, IReadOnlyDictionary<string, FlowNode> nodesById)
+    {
+        var parentId = node.ParentId;
+        while (parentId is not null && nodesById.TryGetValue(parentId, out var parent))
+        {
+            if (parent.Id == ancestorId) return true;
+            parentId = parent.ParentId;
+        }
+        return false;
     }
 
     private static void BindTranslations(ProjectSnapshot snapshot)
@@ -236,27 +286,20 @@ public sealed class ProjectAnalyzer
     private static string NormalizeSourcePath(string sourcePath, string projectRoot)
     {
         var normalized = TextUtilities.NormalizePath(sourcePath);
+        var rootName = Path.GetFileName(projectRoot.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
         if (normalized.StartsWith("game/", StringComparison.OrdinalIgnoreCase))
         {
-            return normalized;
+            return string.Equals(rootName, "game", StringComparison.OrdinalIgnoreCase)
+                ? normalized["game/".Length..]
+                : normalized;
         }
 
-        var rootName = Path.GetFileName(projectRoot.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
         var marker = rootName + "/game/";
         var index = normalized.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
         return index >= 0 ? normalized[(index + rootName.Length + 1)..] : normalized;
     }
 
     private static string? ExtractLastQuotedValue(string statement)
-    {
-        var lastQuote = statement.LastIndexOf('"');
-        if (lastQuote <= 0)
-        {
-            return null;
-        }
-
-        var firstQuote = statement.LastIndexOf('"', lastQuote - 1);
-        return firstQuote >= 0 ? TextUtilities.UnescapeRenPyString(statement[(firstQuote + 1)..lastQuote]) : null;
-    }
+        => TextUtilities.ExtractLastQuotedString(statement);
 
 }

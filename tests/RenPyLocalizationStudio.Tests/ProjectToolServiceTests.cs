@@ -48,7 +48,7 @@ public sealed class ProjectToolServiceTests
         var execution = await service.ExecuteAsync(new PrefixRenameExecutionRequest(plan.Value!),
             new Progress<ToolOperationProgress>(), CancellationToken.None);
 
-        Assert.Equal(OperationStatus.SucceededWithWarnings, execution.Status);
+        Assert.Equal(OperationStatus.Failed, execution.Status);
         Assert.Contains(execution.Diagnostics, x => x.Code == "EXTERNAL_MODIFICATION");
         Assert.True(File.Exists(source));
         Assert.False(File.Exists(Path.Combine(project.Images, "change.txt")));

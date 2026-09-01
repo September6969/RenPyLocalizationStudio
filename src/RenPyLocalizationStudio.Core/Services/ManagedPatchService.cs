@@ -5,8 +5,21 @@ namespace RenPyLocalizationStudio.Core.Services;
 
 public enum PatchModuleKind { DefaultLanguage, PreferencesLanguage, FontOverride, ReplacementRules, CustomCode, ExtraStrings }
 public sealed record PatchModule(PatchModuleKind Kind, string Content, bool Enabled = true);
-public sealed record ManagedPatchRequest(ProjectRoot Project, string RelativePath, IReadOnlyList<PatchModule> Modules, string? ExpectedSha256 = null);
-public sealed record ManagedPatchPreview(string RelativePath, string OriginalText, string UpdatedText, IReadOnlyList<Diagnostic> Diagnostics, bool HasBom, string NewLine);
+public sealed record ManagedPatchRequest(
+    ProjectRoot Project,
+    string RelativePath,
+    IReadOnlyList<PatchModule> Modules,
+    string? ExpectedSha256 = null,
+    bool RequireTargetMissing = false);
+public sealed record ManagedPatchPreview(
+    string RelativePath,
+    string OriginalText,
+    string UpdatedText,
+    IReadOnlyList<Diagnostic> Diagnostics,
+    bool HasBom,
+    string NewLine,
+    string? OriginalSha256 = null,
+    bool TargetExists = false);
 public sealed record ManagedPatchWriteRequest(ManagedPatchRequest Patch, bool Confirmed);
 public sealed record ManagedPatchWriteSummary(string RelativePath, string Sha256, bool BackupCreated);
 
@@ -33,19 +46,32 @@ public sealed class ManagedPatchService : IManagedPatchService
         var original = string.Empty;
         var newLine = Environment.NewLine;
         var hasBom = false;
-        if (File.Exists(targetResult.Value.FullPath))
+        string? originalSha256 = null;
+        var exists = await _fileSystem.ExistsAsync(targetResult.Value, cancellationToken).ConfigureAwait(false);
+        if (!exists.IsSuccess) return new(exists.Status, null, exists.Diagnostics);
+        var targetExists = exists.Value;
+        if (targetExists)
         {
             var read = await _fileSystem.ReadUtf8Async(targetResult.Value, cancellationToken).ConfigureAwait(false);
             if (!read.IsSuccess || read.Value is null) return new(read.Status, null, read.Diagnostics);
             original = read.Value.Text;
             newLine = read.Value.NewLine;
             hasBom = read.Value.HasBom;
+            originalSha256 = read.Value.Sha256;
         }
         var diagnostics = new List<Diagnostic>();
         var updated = original;
-        foreach (var module in request.Modules.Where(x => x.Enabled))
+        diagnostics.AddRange(ValidateManagedMarkers(original, request.RelativePath));
+        if (diagnostics.Any(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error))
         {
-            cancellationToken.ThrowIfCancellationRequested();
+            var invalidPreview = new ManagedPatchPreview(request.RelativePath, original, original, diagnostics, hasBom, newLine, originalSha256, targetExists);
+            return new OperationResult<ManagedPatchPreview>(OperationStatus.Failed, invalidPreview, diagnostics);
+        }
+        foreach (var module in request.Modules)
+        {
+            if (cancellationToken.IsCancellationRequested)
+                return OperationResult<ManagedPatchPreview>.Cancelled(
+                    new Diagnostic(DiagnosticSeverity.Info, "PATCH_PREVIEW_CANCELLED", "补丁预览已取消。", request.RelativePath, Category: DiagnosticCategory.Patch));
             var name = module.Kind.ToString().ToUpperInvariant();
             var begin = $"# RLS-ZZZ-BEGIN {name}";
             var end = $"# RLS-ZZZ-END {name}";
@@ -57,11 +83,17 @@ public sealed class ManagedPatchService : IManagedPatchService
                 diagnostics.Add(new Diagnostic(DiagnosticSeverity.Error, "PATCH_DUPLICATE_MANAGED_BLOCK", $"受管区块 {name} 出现多次。", request.RelativePath, Category: DiagnosticCategory.Patch));
                 continue;
             }
+            if (!module.Enabled)
+            {
+                // 向导取消某个模块时只删除该模块的受管区块，标记外内容保持不变。
+                if (matches.Count == 1) updated = Regex.Replace(updated, pattern, string.Empty, RegexOptions.Singleline);
+                continue;
+            }
             updated = matches.Count == 1 ? Regex.Replace(updated, pattern, _ => block, RegexOptions.Singleline)
                 : AppendBlock(updated, block, newLine);
         }
         progress.Report(ToolOperationProgress.Create(ToolOperationStage.Planning, "补丁差异已生成", relativePath: request.RelativePath));
-        var preview = new ManagedPatchPreview(request.RelativePath, original, updated, diagnostics, hasBom, newLine);
+        var preview = new ManagedPatchPreview(request.RelativePath, original, updated, diagnostics, hasBom, newLine, originalSha256, targetExists);
         return new(diagnostics.Any(x => x.Severity == DiagnosticSeverity.Error) ? OperationStatus.Failed : OperationStatus.Succeeded, preview, diagnostics);
     }
 
@@ -74,7 +106,14 @@ public sealed class ManagedPatchService : IManagedPatchService
         if (!target.IsSuccess || target.Value is null) return new(OperationStatus.Failed, null, target.Diagnostics);
         var payload = new UTF8Encoding(false, true).GetBytes(preview.Value.UpdatedText);
         var bytes = preview.Value.HasBom ? Encoding.UTF8.GetPreamble().Concat(payload).ToArray() : payload;
-        var write = await _fileSystem.AtomicWriteAsync(new AtomicWriteRequest(target.Value, bytes, request.Patch.ExpectedSha256), progress, cancellationToken).ConfigureAwait(false);
+        var expectedSha256 = request.Patch.ExpectedSha256 ?? preview.Value.OriginalSha256;
+        var requireTargetMissing = request.Patch.RequireTargetMissing ||
+                                    (!preview.Value.TargetExists && request.Patch.ExpectedSha256 is null);
+        var write = await _fileSystem.AtomicWriteAsync(new AtomicWriteRequest(
+            target.Value,
+            bytes,
+            expectedSha256,
+            RequireTargetMissing: requireTargetMissing), progress, cancellationToken).ConfigureAwait(false);
         return write.Value is null ? new(write.Status, null, write.Diagnostics) : new(write.Status, new ManagedPatchWriteSummary(write.Value.RelativePath, write.Value.Sha256, write.Value.BackupCreated), write.Diagnostics);
     }
 
@@ -93,4 +132,46 @@ public sealed class ManagedPatchService : IManagedPatchService
     }
     private static string AppendBlock(string text, string block, string newLine) => text.Length == 0 ? block + newLine : text.TrimEnd('\r', '\n') + newLine + newLine + block + (text.EndsWith('\n') ? newLine : string.Empty);
     private static string NormalizeNewLines(string text, string newLine) => text.Replace("\r\n", "\n", StringComparison.Ordinal).Replace("\r", "\n", StringComparison.Ordinal).Replace("\n", newLine, StringComparison.Ordinal);
+
+    private static IReadOnlyList<Diagnostic> ValidateManagedMarkers(string text, string relativePath)
+    {
+        var diagnostics = new List<Diagnostic>();
+        var stack = new Stack<(string Name, int Line)>();
+        var marker = new Regex("^[ \\t]*# RLS-ZZZ-(?<kind>BEGIN|END) (?<name>[A-Z_]+)[ \\t]*$", RegexOptions.CultureInvariant);
+        var lines = TextUtilities.SliceLines(text);
+        foreach (var line in lines)
+        {
+            var match = marker.Match(line.Content.TrimEnd('\r', '\n'));
+            if (!match.Success) continue;
+            var kind = match.Groups["kind"].Value;
+            var name = match.Groups["name"].Value;
+            if (kind == "BEGIN")
+            {
+                if (stack.Count > 0)
+                {
+                    diagnostics.Add(new Diagnostic(DiagnosticSeverity.Error, "PATCH_NESTED_MANAGED_MARKER",
+                        $"受管区块 {name} 嵌套在 {stack.Peek().Name} 内，无法安全更新。", relativePath, line.Number, DiagnosticCategory.Patch));
+                }
+                stack.Push((name, line.Number));
+                continue;
+            }
+
+            if (stack.Count == 0)
+            {
+                diagnostics.Add(new Diagnostic(DiagnosticSeverity.Error, "PATCH_ORPHAN_END_MARKER",
+                    $"发现没有 BEGIN 的 END 标记：{name}。", relativePath, line.Number, DiagnosticCategory.Patch));
+                continue;
+            }
+            var opened = stack.Pop();
+            if (!opened.Name.Equals(name, StringComparison.Ordinal))
+            {
+                diagnostics.Add(new Diagnostic(DiagnosticSeverity.Error, "PATCH_MISMATCHED_MARKER",
+                    $"受管区块标记不匹配：BEGIN {opened.Name}，END {name}。", relativePath, line.Number, DiagnosticCategory.Patch));
+            }
+        }
+        foreach (var opened in stack)
+            diagnostics.Add(new Diagnostic(DiagnosticSeverity.Error, "PATCH_ORPHAN_BEGIN_MARKER",
+                $"受管区块 {opened.Name} 缺少 END 标记。", relativePath, opened.Line, DiagnosticCategory.Patch));
+        return diagnostics;
+    }
 }

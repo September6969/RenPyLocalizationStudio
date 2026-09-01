@@ -105,7 +105,14 @@ public static class AvalonEditBindingBehavior
     private static void SyncFromViewModel(TextEditor editor, string text, bool clearUndo)
     {
         var state = States.GetOrCreateValue(editor);
-        if (state.IsUpdating || string.Equals(editor.Text, text, StringComparison.Ordinal)) return;
+        if (state.IsUpdating) return;
+        if (string.Equals(editor.Text, text, StringComparison.Ordinal))
+        {
+            // 切换到内容相同但 DocumentKey 不同的条目时仍要清空撤销栈，
+            // 否则 Ctrl+Z 会把上一个翻译条目的编辑带入当前条目。
+            if (clearUndo) editor.Document.UndoStack.ClearAll();
+            return;
+        }
         var caret = Math.Min(editor.CaretOffset, text.Length);
         state.IsUpdating = true;
         editor.Document.Text = text;

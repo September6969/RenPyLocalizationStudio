@@ -159,7 +159,7 @@ public sealed class TranslationMainContentViewModel : WorkspaceMainContentViewMo
     public TranslationWorkspaceViewModel Workspace { get; }
 }
 
-public sealed partial class TranslationInspectorViewModel : WorkspaceInspectorViewModelBase
+public sealed partial class TranslationInspectorViewModel : WorkspaceInspectorViewModelBase, IDisposable
 {
     private readonly TranslationValidator _validator = new();
     private readonly TaskCenterViewModel _tasks;
@@ -182,12 +182,13 @@ public sealed partial class TranslationInspectorViewModel : WorkspaceInspectorVi
     {
         _tasks = tasks;
         UnifyConflictCommand = new RelayCommand(UnifyConflict, () => _target?.HasConflict == true);
+        _tasks.PropertyChanged += OnTaskCenterPropertyChanged;
     }
 
     public ObservableCollection<string> PlaceholderTokens { get; } = [];
     public IRelayCommand UnifyConflictCommand { get; }
     public bool HasTarget => _target is not null;
-    public bool IsReadOnly => _target is null;
+    public bool IsReadOnly => _target is null || _tasks.IsBusy;
     public bool HasConflict => _target?.HasConflict == true;
     public string Title { get => _title; private set => SetProperty(ref _title, value); }
     public string Location { get => _location; private set => SetProperty(ref _location, value); }
@@ -203,6 +204,7 @@ public sealed partial class TranslationInspectorViewModel : WorkspaceInspectorVi
         get => _translationText;
         set
         {
+            if (!_updating && _tasks.IsBusy) return;
             if (!SetProperty(ref _translationText, value) || _updating || _target is null) return;
             _target.SetTranslation(value);
             ValidationMessage = string.Join(Environment.NewLine, _validator.Validate(_target.Source, value).Select(x => x.Message));
@@ -240,6 +242,13 @@ public sealed partial class TranslationInspectorViewModel : WorkspaceInspectorVi
 
     public void RequestFocus() => FocusRequest++;
 
+    public void Dispose() => _tasks.PropertyChanged -= OnTaskCenterPropertyChanged;
+
+    private void OnTaskCenterPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs args)
+    {
+        if (args.PropertyName == nameof(TaskCenterViewModel.IsBusy)) OnPropertyChanged(nameof(IsReadOnly));
+    }
+
     private void UnifyConflict()
     {
         _target?.SharedString?.Unify(TranslationText);
@@ -265,11 +274,14 @@ public sealed class TranslationWorkspaceViewModel : WorkspaceViewModelBase, IDis
     private IReadOnlyList<ContentItem> _coverageItems = [];
     private readonly Dictionary<ContentItem, bool> _completionStates = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<SharedStringEntry, List<ContentItem>> _sharedPresentationItems = new(ReferenceEqualityComparer.Instance);
+    private readonly Dictionary<string, int> _visibleItemIndexes = new(StringComparer.Ordinal);
     private readonly HashSet<string> _bookmarkedNodeIds = new(StringComparer.Ordinal);
+    private readonly object _previewSync = new();
+    private readonly HashSet<Task> _previewRequests = [];
     private CancellationTokenSource? _previewCancellation;
-    private Task _previewTask = Task.CompletedTask;
-    private Task _previewCleanupTask = Task.CompletedTask;
+    private string? _indexedPreviewProjectPath;
     private long _previewVersion;
+    private int _disposed;
 
     public TranslationWorkspaceViewModel(ProjectSessionViewModel session, IRenPyImagePreviewService? imagePreviewService = null)
         : base("translation", "翻译", "\uE8A5")
@@ -291,6 +303,8 @@ public sealed class TranslationWorkspaceViewModel : WorkspaceViewModelBase, IDis
         ClearSearchCommand = new RelayCommand(() => SearchText = string.Empty, () => SearchText.Length > 0);
         Inspector.TranslationChanged += OnTranslationChanged;
         session.SnapshotChanged += OnSnapshotChanged;
+        session.SaveCompleted += OnSaveCompleted;
+        session.PropertyChanged += OnSessionPropertyChanged;
     }
 
     public TranslationSidebarViewModel Sidebar { get; }
@@ -301,7 +315,7 @@ public sealed class TranslationWorkspaceViewModel : WorkspaceViewModelBase, IDis
     public override WorkspaceMainContentViewModelBase MainContent => Main;
     public override WorkspaceInspectorViewModelBase InspectorContent => Inspector;
     public ObservableCollection<NavigationItem> Labels { get; } = [];
-    public ObservableCollection<ContentItem> VisibleItems { get; } = [];
+    public IReadOnlyList<ContentItem> VisibleItems { get; private set; } = [];
     public IReadOnlyList<TranslationViewMode> ViewModes { get; } = Enum.GetValues<TranslationViewMode>();
     public IReadOnlyList<FlowGroupingMode> GroupingModes { get; } = Enum.GetValues<FlowGroupingMode>();
     public IRelayCommand OpenSelectedCommand { get; }
@@ -359,7 +373,9 @@ public sealed class TranslationWorkspaceViewModel : WorkspaceViewModelBase, IDis
             if (!SetProperty(ref _selectedItem, value)) return;
             UpdateInspector(value);
             StartImagePreviewUpdate(value);
-            if (value is not null) ScrollAnchor = new ScrollAnchor(value.Key, FallbackIndex: VisibleItems.IndexOf(value));
+            if (value is not null)
+                ScrollAnchor = new ScrollAnchor(value.Key,
+                    FallbackIndex: _visibleItemIndexes.GetValueOrDefault(value.Key, -1));
             NavigateBookmarkCommand.NotifyCanExecuteChanged();
             PositionChanged?.Invoke(this, EventArgs.Empty);
         }
@@ -405,13 +421,39 @@ public sealed class TranslationWorkspaceViewModel : WorkspaceViewModelBase, IDis
 
     public void Dispose()
     {
+        if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
         Inspector.TranslationChanged -= OnTranslationChanged;
+        Inspector.Dispose();
         _session.SnapshotChanged -= OnSnapshotChanged;
-        _previewCancellation?.Cancel();
-        if (_previewCancellation is not null)
-            _previewCleanupTask = DisposeCancellationAfterTaskAsync(_previewTask, _previewCancellation);
-        _previewCancellation = null;
-        if (_ownsImagePreviewService && _imagePreviewService is IDisposable disposable) disposable.Dispose();
+        _session.SaveCompleted -= OnSaveCompleted;
+        _session.PropertyChanged -= OnSessionPropertyChanged;
+        Task[] requests;
+        lock (_previewSync)
+        {
+            _previewCancellation?.Cancel();
+            requests = _previewRequests.ToArray();
+        }
+        if (_ownsImagePreviewService && _imagePreviewService is IDisposable disposable)
+        {
+            if (requests.Length == 0) disposable.Dispose();
+            else _ = DisposePreviewServiceWhenIdleAsync(requests, disposable);
+        }
+    }
+
+    /// <summary>窗口关闭前等待全部预览请求退出，避免索引仍在构建时释放 watcher 或锁。</summary>
+    public async Task StopPreviewAsync(CancellationToken cancellationToken)
+    {
+        while (true)
+        {
+            Task[] requests;
+            lock (_previewSync)
+            {
+                _previewCancellation?.Cancel();
+                requests = _previewRequests.ToArray();
+            }
+            if (requests.Length == 0) return;
+            await Task.WhenAll(requests).WaitAsync(cancellationToken);
+        }
     }
 
     private void OnTranslationChanged(object? sender, EventArgs args)
@@ -420,10 +462,36 @@ public sealed class TranslationWorkspaceViewModel : WorkspaceViewModelBase, IDis
         _session.ScheduleAutoSave();
     }
 
+    private void OnSaveCompleted(object? sender, EventArgs args)
+    {
+        foreach (var item in _coverageItems) item.MarkPersisted();
+        RecalculateCoverage();
+    }
+
     private void OnSnapshotChanged(object? sender, ProjectSnapshot? snapshot)
     {
-        if (!string.IsNullOrWhiteSpace(_session.ProjectPath)) _imagePreviewService.InvalidateProject(_session.ProjectPath);
+        if (snapshot is not null)
+        {
+            InvalidatePreviewProject(_indexedPreviewProjectPath);
+            _indexedPreviewProjectPath = snapshot.ProjectRoot;
+            _imagePreviewService.InvalidateProject(snapshot.ProjectRoot);
+        }
         RefreshFromSnapshot();
+    }
+
+    private void OnSessionPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs args)
+    {
+        if (args.PropertyName is not (nameof(ProjectSessionViewModel.ProjectPath) or nameof(ProjectSessionViewModel.Language))) return;
+        lock (_previewSync) _previewCancellation?.Cancel();
+        InvalidatePreviewProject(_indexedPreviewProjectPath);
+        _indexedPreviewProjectPath = null;
+        ImagePreview.UpdateContext(new RenPySceneContext(null, null, []));
+        // 书签 ID 只在当前项目快照内有效，切换项目或语言时必须清空。
+        if (_bookmarkedNodeIds.Count > 0)
+        {
+            _bookmarkedNodeIds.Clear();
+            OnPropertyChanged(nameof(BookmarkedCount));
+        }
     }
 
     public bool Navigate(NavigateToSourceRequest request)
@@ -532,7 +600,6 @@ public sealed class TranslationWorkspaceViewModel : WorkspaceViewModelBase, IDis
         var selectedId = SelectedItem?.Key ?? ScrollAnchor?.ItemId;
         RebuildNavigation();
         RebuildProjection(selectedId);
-        Badge = _session.Snapshot is null ? null : _session.Snapshot.TranslationUnits.Count(x => string.IsNullOrWhiteSpace(x.TranslationText)).ToString();
     }
 
     private void RebuildProjection(string? preferredId = null)
@@ -567,11 +634,14 @@ public sealed class TranslationWorkspaceViewModel : WorkspaceViewModelBase, IDis
     private void ApplySearchFilter(string? preferredId = null)
     {
         preferredId ??= SelectedItem?.Key ?? ScrollAnchor?.ItemId;
-        VisibleItems.Clear();
         IEnumerable<ContentItem> items = _coverageItems;
         var search = SearchText.Trim();
         if (search.Length > 0) items = items.Where(x => x.SearchText.Contains(search, StringComparison.OrdinalIgnoreCase));
-        foreach (var item in items) VisibleItems.Add(item);
+        VisibleItems = items.ToArray();
+        _visibleItemIndexes.Clear();
+        for (var index = 0; index < VisibleItems.Count; index++)
+            _visibleItemIndexes.TryAdd(VisibleItems[index].Key, index);
+        OnPropertyChanged(nameof(VisibleItems));
         SelectedItem = preferredId is null ? null : VisibleItems.FirstOrDefault(x => x.Key == preferredId);
         if (SelectedItem is not null) AnchorItem = SelectedItem;
         NotifyCollectionPresentation();
@@ -680,7 +750,9 @@ public sealed class TranslationWorkspaceViewModel : WorkspaceViewModelBase, IDis
 
     private void MoveEditable(int direction)
     {
-        var selectedIndex = SelectedItem is null ? -1 : VisibleItems.IndexOf(SelectedItem);
+        var selectedIndex = SelectedItem is not null && _visibleItemIndexes.TryGetValue(SelectedItem.Key, out var knownIndex)
+            ? knownIndex
+            : -1;
         var index = selectedIndex < 0
             ? (direction > 0 ? 0 : VisibleItems.Count - 1)
             : selectedIndex + direction;
@@ -695,7 +767,7 @@ public sealed class TranslationWorkspaceViewModel : WorkspaceViewModelBase, IDis
             var item = VisibleItems[index];
             if (direction > 0 && item.Node?.Kind == FlowNodeKind.Jump &&
                 visitedJumps.Add(item.Node.Id) &&
-                TryResolveJumpTargetIndex(VisibleItems, _session.Snapshot?.Graph, index, out var targetIndex, out var targetLabel))
+                TryResolveJumpTargetIndexFast(item.Node, _session.Snapshot?.Graph, out var targetIndex, out var targetLabel))
             {
                 index = targetIndex;
                 followedLabel = targetLabel;
@@ -715,6 +787,21 @@ public sealed class TranslationWorkspaceViewModel : WorkspaceViewModelBase, IDis
             index += direction;
         }
         _session.Tasks.StatusMessage = direction > 0 ? "已经是最后一条可编辑译文。" : "已经是第一条可编辑译文。";
+    }
+
+    private bool TryResolveJumpTargetIndexFast(
+        FlowNode jump,
+        FlowGraph? graph,
+        out int targetIndex,
+        out string targetLabel)
+    {
+        targetIndex = -1;
+        targetLabel = string.Empty;
+        if (graph is null || string.IsNullOrWhiteSpace(jump.Target) ||
+            !graph.Labels.TryGetValue(jump.Target, out var label) ||
+            !_visibleItemIndexes.TryGetValue(label.Id, out targetIndex)) return false;
+        targetLabel = jump.Target;
+        return true;
     }
 
     internal static bool TryResolveJumpTargetIndex(
@@ -797,6 +884,7 @@ public sealed class TranslationWorkspaceViewModel : WorkspaceViewModelBase, IDis
     private void PublishCoverage()
     {
         CoveragePercent = EditableCount == 0 ? 0 : TranslatedCount * 100d / EditableCount;
+        Badge = EditableCount == 0 ? null : Math.Max(0, EditableCount - TranslatedCount).ToString();
         OnPropertyChanged(nameof(EditableCount));
         OnPropertyChanged(nameof(TranslatedCount));
         OnPropertyChanged(nameof(CoveragePercent));
@@ -812,42 +900,71 @@ public sealed class TranslationWorkspaceViewModel : WorkspaceViewModelBase, IDis
 
     private void StartImagePreviewUpdate(ContentItem? item)
     {
-        var previousCancellation = _previewCancellation;
-        var previousTask = _previewTask;
-        _previewCancellation = new CancellationTokenSource();
-        var version = Interlocked.Increment(ref _previewVersion);
-        _previewTask = UpdateImagePreviewAsync(item, version, _previewCancellation.Token);
-        if (previousCancellation is not null)
+        if (Volatile.Read(ref _disposed) != 0) return;
+        var projectPath = _session.ProjectPath;
+        if (!string.IsNullOrWhiteSpace(projectPath) &&
+            !string.Equals(_indexedPreviewProjectPath, projectPath, StringComparison.OrdinalIgnoreCase))
         {
-            previousCancellation.Cancel();
-            _previewCleanupTask = DisposeCancellationAfterTaskAsync(previousTask, previousCancellation);
+            InvalidatePreviewProject(_indexedPreviewProjectPath);
+            _indexedPreviewProjectPath = projectPath;
+        }
+
+        var cancellation = new CancellationTokenSource();
+        var version = Interlocked.Increment(ref _previewVersion);
+        var task = UpdateImagePreviewAsync(item, projectPath, version, cancellation.Token);
+        CancellationTokenSource? previousCancellation;
+        lock (_previewSync)
+        {
+            if (Volatile.Read(ref _disposed) != 0)
+            {
+                cancellation.Cancel();
+                cancellation.Dispose();
+                return;
+            }
+            previousCancellation = _previewCancellation;
+            _previewCancellation = cancellation;
+            _previewRequests.Add(task);
+        }
+        previousCancellation?.Cancel();
+        _ = TrackPreviewRequestAsync(task, cancellation);
+    }
+
+    private async Task TrackPreviewRequestAsync(Task task, CancellationTokenSource cancellation)
+    {
+        try { await task; }
+        finally
+        {
+            lock (_previewSync)
+            {
+                _previewRequests.Remove(task);
+                if (ReferenceEquals(_previewCancellation, cancellation)) _previewCancellation = null;
+            }
+            cancellation.Dispose();
         }
     }
 
-    private static async Task DisposeCancellationAfterTaskAsync(Task task, CancellationTokenSource cancellation)
-    {
-        try { await task; }
-        finally { cancellation.Dispose(); }
-    }
-
-    private async Task UpdateImagePreviewAsync(ContentItem? item, long version, CancellationToken cancellationToken)
+    private async Task UpdateImagePreviewAsync(ContentItem? item, string projectPath, long version, CancellationToken cancellationToken)
     {
         var node = item?.Node ?? item?.Unit?.BoundNode;
         var relativePath = node?.Region.RelativePath ?? item?.Unit?.SourcePath;
         var line = node?.Region.StartLine ?? item?.Unit?.SourceLine ?? 0;
 
-        if (string.IsNullOrWhiteSpace(_session.ProjectPath) || string.IsNullOrWhiteSpace(relativePath) || line <= 0)
+        if (string.IsNullOrWhiteSpace(projectPath) || string.IsNullOrWhiteSpace(relativePath) || line <= 0)
         {
-            ImagePreview.UpdateContext(new RenPySceneContext(null, null, []));
+            if (Volatile.Read(ref _disposed) == 0)
+                ImagePreview.UpdateContext(new RenPySceneContext(null, null, []));
             return;
         }
 
         try
         {
             var context = await _imagePreviewService.ResolveSceneContextAsync(
-                new RenPyImagePreviewRequest(_session.ProjectPath, relativePath, line, item?.Key),
+                new RenPyImagePreviewRequest(projectPath, relativePath, line, item?.Key),
                 cancellationToken);
-            if (version == Volatile.Read(ref _previewVersion) && ReferenceEquals(item, SelectedItem))
+            if (Volatile.Read(ref _disposed) == 0 &&
+                version == Volatile.Read(ref _previewVersion) &&
+                string.Equals(projectPath, _session.ProjectPath, StringComparison.OrdinalIgnoreCase) &&
+                ReferenceEquals(item, SelectedItem))
                 ImagePreview.UpdateContext(context);
         }
         catch (OperationCanceledException)
@@ -856,17 +973,28 @@ public sealed class TranslationWorkspaceViewModel : WorkspaceViewModelBase, IDis
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException)
         {
-            if (version == Volatile.Read(ref _previewVersion))
+            if (Volatile.Read(ref _disposed) == 0 && version == Volatile.Read(ref _previewVersion))
                 _session.Tasks.StatusMessage = $"图片预览不可用：{exception.Message}";
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
             // 预览属于非阻断功能，但后台异常必须被观察并进入任务日志。
-            if (version == Volatile.Read(ref _previewVersion))
+            if (Volatile.Read(ref _disposed) == 0 && version == Volatile.Read(ref _previewVersion))
             {
                 _session.Tasks.StatusMessage = $"图片预览失败：{exception.Message}";
                 _session.Tasks.Logs.Add(new ToolLogEntry(_session.Tasks.StatusMessage, "Error"));
             }
         }
+    }
+
+    private void InvalidatePreviewProject(string? projectPath)
+    {
+        if (!string.IsNullOrWhiteSpace(projectPath)) _imagePreviewService.InvalidateProject(projectPath);
+    }
+
+    private static async Task DisposePreviewServiceWhenIdleAsync(Task[] requests, IDisposable service)
+    {
+        try { await Task.WhenAll(requests).ConfigureAwait(false); }
+        finally { service.Dispose(); }
     }
 }

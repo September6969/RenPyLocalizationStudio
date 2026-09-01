@@ -15,6 +15,7 @@ public abstract class ProjectToolPanelViewModel(string id, string title, string 
 }
 
 public enum UnrenOperationKind { ExtractRpa, DecompileRpyc }
+public sealed record UnrenPlanRow(string Source, string Output, string Status, bool IsError);
 
 public sealed class UnrenToolViewModel : ProjectToolPanelViewModel
 {
@@ -24,6 +25,9 @@ public sealed class UnrenToolViewModel : ProjectToolPanelViewModel
         : base("unren", "UnRen 工具", "安全处理 Ren’Py 归档和编译脚本；源文件始终保留。") => Workspace = workspace;
 
     public ArchiveWorkspaceViewModel Workspace { get; }
+    public ObservableCollection<UnrenPlanRow> PlanItems { get; } = [];
+    private string _planSummary = "尚未生成逐项计划。";
+    public string PlanSummary { get => _planSummary; set => SetProperty(ref _planSummary, value); }
     public UnrenOperationKind Operation
     {
         get => _operation;
@@ -47,7 +51,12 @@ public sealed class UnrenToolViewModel : ProjectToolPanelViewModel
         ? "归档条目会先执行路径越界检查；不会运行游戏 EXE，不会删除源 RPA，也不会覆盖已有文件。"
         : "反编译只读取 RPYC/RPYMC；不会运行游戏脚本，不会删除编译文件，也不会覆盖已有 RPY。";
 
-    public void SelectOperation(UnrenOperationKind operation) => Operation = operation;
+    public void SelectOperation(UnrenOperationKind operation)
+    {
+        Operation = operation;
+        PlanItems.Clear();
+        PlanSummary = "尚未生成逐项计划。";
+    }
 }
 
 public sealed record PrefixRenameRow(string Source, string Target, string Status, bool HasConflict);
@@ -73,6 +82,7 @@ public sealed class PrefixRenameToolViewModel : ProjectToolPanelViewModel
         _confirmation = confirmation;
         PlanCommand = new AsyncRelayCommand(PlanAsync);
         ExecuteCommand = new AsyncRelayCommand(ExecuteAsync, () => _plan?.ReadyCount > 0);
+        _session.PropertyChanged += OnSessionPropertyChanged;
     }
 
     public ObservableCollection<PrefixRenameRow> Items { get; } = [];
@@ -83,15 +93,29 @@ public sealed class PrefixRenameToolViewModel : ProjectToolPanelViewModel
     public bool Recursive { get => _recursive; set { if (SetProperty(ref _recursive, value)) InvalidatePlan(); } }
     public string Summary { get => _summary; private set => SetProperty(ref _summary, value); }
 
+    private void OnSessionPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs args)
+    {
+        if (args.PropertyName is nameof(ProjectSessionViewModel.ProjectPath) or nameof(ProjectSessionViewModel.Language))
+            InvalidatePlan();
+    }
+
     private async Task PlanAsync()
     {
         var root = _fileSystem.ValidateProjectRoot(_session.ProjectPath);
         if (!root.IsSuccess || root.Value is null) { _confirmation.ShowDiagnostics("项目路径无效", root.Diagnostics); return; }
         await _session.Tasks.RunAsync("正在生成重命名预览……", async token =>
         {
-            var result = await _service.PlanAsync(new PrefixRenamePlanRequest(root.Value, RelativeDirectory, Prefix, Recursive),
+            var projectPath = _session.ProjectPath;
+            var relativeDirectory = ProjectLayout.ResolveProjectRelativePath(root.Value, RelativeDirectory);
+            var result = await _service.PlanAsync(new PrefixRenamePlanRequest(root.Value, relativeDirectory, Prefix, Recursive),
                 _session.Tasks.CreateProgress(), token);
-            if (!result.IsSuccess || result.Value is null) { _confirmation.ShowDiagnostics("重命名预览失败", result.Diagnostics); return; }
+            if (!result.IsSuccess || result.Value is null)
+            {
+                if (result.Status == OperationStatus.Cancelled) _session.Tasks.StatusMessage = "重命名预览已取消。";
+                else _confirmation.ShowDiagnostics("重命名预览失败", result.Diagnostics);
+                return;
+            }
+            if (!string.Equals(projectPath, _session.ProjectPath, StringComparison.OrdinalIgnoreCase)) return;
             _plan = result.Value;
             Items.Clear();
             foreach (var item in _plan.Items)
@@ -109,7 +133,12 @@ public sealed class PrefixRenameToolViewModel : ProjectToolPanelViewModel
         await _session.Tasks.RunAsync("正在批量重命名……", async token =>
         {
             var result = await _service.ExecuteAsync(new PrefixRenameExecutionRequest(_plan), _session.Tasks.CreateProgress(), token);
-            if (!result.IsSuccess || result.Value is null) { _confirmation.ShowDiagnostics("批量重命名失败", result.Diagnostics); return; }
+            if (!result.IsSuccess || result.Value is null)
+            {
+                if (result.Status == OperationStatus.Cancelled) _session.Tasks.StatusMessage = "批量重命名已取消。";
+                else _confirmation.ShowDiagnostics("批量重命名失败", result.Diagnostics);
+                return;
+            }
             Summary = $"已重命名 {result.Value.RenamedFiles:N0} 项，跳过 {result.Value.SkippedFiles:N0} 项。";
             _session.Tasks.StatusMessage = Summary;
             InvalidatePlan(false);
@@ -157,6 +186,7 @@ public sealed class ImageCompressionToolViewModel : ProjectToolPanelViewModel
         _confirmation = confirmation;
         PlanCommand = new AsyncRelayCommand(PlanAsync);
         ExecuteCommand = new AsyncRelayCommand(ExecuteAsync, () => _plan?.ReadyCount > 0);
+        _session.PropertyChanged += OnSessionPropertyChanged;
     }
 
     public ObservableCollection<ImageCompressionRow> Items { get; } = [];
@@ -170,15 +200,30 @@ public sealed class ImageCompressionToolViewModel : ProjectToolPanelViewModel
     public bool Recursive { get => _recursive; set { if (SetProperty(ref _recursive, value)) InvalidatePlan(); } }
     public string Summary { get => _summary; private set => SetProperty(ref _summary, value); }
 
+    private void OnSessionPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs args)
+    {
+        if (args.PropertyName is nameof(ProjectSessionViewModel.ProjectPath) or nameof(ProjectSessionViewModel.Language))
+            InvalidatePlan();
+    }
+
     private async Task PlanAsync()
     {
         var root = _fileSystem.ValidateProjectRoot(_session.ProjectPath);
         if (!root.IsSuccess || root.Value is null) { _confirmation.ShowDiagnostics("项目路径无效", root.Diagnostics); return; }
         await _session.Tasks.RunAsync("正在分析图片与压缩收益……", async token =>
         {
-            var result = await _service.PlanAsync(new ImageCompressionPlanRequest(root.Value, RelativeDirectory, Quality,
-                MinimumSavingPercent, ReplaceOriginals, OutputDirectory, Recursive), _session.Tasks.CreateProgress(), token);
-            if (!result.IsSuccess || result.Value is null) { _confirmation.ShowDiagnostics("图片压缩预览失败", result.Diagnostics); return; }
+            var projectPath = _session.ProjectPath;
+            var relativeDirectory = ProjectLayout.ResolveProjectRelativePath(root.Value, RelativeDirectory);
+            var outputDirectory = ProjectLayout.ResolveProjectRelativePath(root.Value, OutputDirectory);
+            var result = await _service.PlanAsync(new ImageCompressionPlanRequest(root.Value, relativeDirectory, Quality,
+                MinimumSavingPercent, ReplaceOriginals, outputDirectory, Recursive), _session.Tasks.CreateProgress(), token);
+            if (!result.IsSuccess || result.Value is null)
+            {
+                if (result.Status == OperationStatus.Cancelled) _session.Tasks.StatusMessage = "图片压缩预览已取消。";
+                else _confirmation.ShowDiagnostics("图片压缩预览失败", result.Diagnostics);
+                return;
+            }
+            if (!string.Equals(projectPath, _session.ProjectPath, StringComparison.OrdinalIgnoreCase)) return;
             _plan = result.Value;
             Items.Clear();
             foreach (var item in _plan.Items)
@@ -198,7 +243,12 @@ public sealed class ImageCompressionToolViewModel : ProjectToolPanelViewModel
         await _session.Tasks.RunAsync("正在压缩图片……", async token =>
         {
             var result = await _service.ExecuteAsync(new ImageCompressionExecutionRequest(_plan), _session.Tasks.CreateProgress(), token);
-            if (!result.IsSuccess || result.Value is null) { _confirmation.ShowDiagnostics("图片压缩失败", result.Diagnostics); return; }
+            if (!result.IsSuccess || result.Value is null)
+            {
+                if (result.Status == OperationStatus.Cancelled) _session.Tasks.StatusMessage = "图片压缩已取消。";
+                else _confirmation.ShowDiagnostics("图片压缩失败", result.Diagnostics);
+                return;
+            }
             Summary = $"已压缩 {result.Value.CompressedFiles:N0} 项，跳过 {result.Value.SkippedFiles:N0} 项，节省 {FormatBytes(result.Value.SavedBytes)}。";
             _session.Tasks.StatusMessage = Summary;
             InvalidatePlan(false);

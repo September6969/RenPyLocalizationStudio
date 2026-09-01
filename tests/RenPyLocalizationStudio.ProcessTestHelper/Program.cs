@@ -18,5 +18,9 @@ switch (mode)
         await Task.Delay(1500);
         Console.WriteLine("done");
         break;
+    case "environment":
+        Console.WriteLine(Environment.GetEnvironmentVariable("RLS_ALLOWED") ?? "missing-allowed");
+        Console.WriteLine(Environment.GetEnvironmentVariable("RLS_SHOULD_NOT_LEAK") ?? "missing-secret");
+        break;
 }
 return 0;

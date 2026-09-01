@@ -122,10 +122,13 @@ public sealed class ZzzDocumentViewModel : PatchDocumentViewModel
         var modules = new List<PatchModule>();
         var patch = _workspace.PatchService;
         var language = _workspace.Session.Language;
-        if (IncludeDefaultLanguage) modules.Add(patch.CreateDefaultLanguageModule(language));
-        if (IncludePreferences) modules.Add(patch.CreatePreferencesLanguageModule(language, NativeLanguageName));
-        if (IncludeFont && !string.IsNullOrWhiteSpace(FontPath)) modules.Add(patch.CreateFontModule(language, FontPath));
-        if (!string.IsNullOrWhiteSpace(CustomCode)) modules.Add(patch.CreateCustomCodeModule(CustomCode));
+        var defaultLanguage = patch.CreateDefaultLanguageModule(language);
+        modules.Add(defaultLanguage with { Enabled = IncludeDefaultLanguage });
+        var preferences = patch.CreatePreferencesLanguageModule(language, NativeLanguageName);
+        modules.Add(preferences with { Enabled = IncludePreferences });
+        var font = patch.CreateFontModule(language, FontPath);
+        modules.Add(font with { Enabled = IncludeFont && !string.IsNullOrWhiteSpace(FontPath) });
+        modules.Add(new PatchModule(PatchModuleKind.CustomCode, CustomCode, !string.IsNullOrWhiteSpace(CustomCode)));
         await _workspace.PreviewModulesAsync("zzz", modules);
     }
 }
@@ -149,7 +152,15 @@ public sealed class DiffDocumentViewModel : PatchDocumentViewModel
     public string OriginalText { get => _originalText; private set => SetProperty(ref _originalText, value); }
     public string UpdatedText { get => _updatedText; private set => SetProperty(ref _updatedText, value); }
     internal ManagedPatchRequest Request => _request;
-    internal ManagedPatchPreview Preview => new(_request.RelativePath, OriginalText, UpdatedText, [], false, Environment.NewLine);
+    internal ManagedPatchPreview Preview => new(
+        _request.RelativePath,
+        OriginalText,
+        UpdatedText,
+        [],
+        false,
+        Environment.NewLine,
+        _request.ExpectedSha256,
+        !_request.RequireTargetMissing);
     public IAsyncRelayCommand ApplyCommand { get; }
 
     public void Update(ManagedPatchRequest request, ManagedPatchPreview preview)
@@ -167,7 +178,8 @@ public sealed class DiffDocumentViewModel : PatchDocumentViewModel
         await _workspace.Session.Tasks.RunAsync("正在写入受管补丁……", async token =>
         {
             var result = await _workspace.PatchService.ExecuteAsync(new ManagedPatchWriteRequest(_request, true), _workspace.Session.Tasks.CreateProgress(), token);
-            if (!result.IsSuccess) _workspace.Confirmation.ShowDiagnostics("补丁写入失败", result.Diagnostics);
+            if (result.Status == OperationStatus.Cancelled) _workspace.Session.Tasks.StatusMessage = "补丁写入已取消。";
+            else if (!result.IsSuccess) _workspace.Confirmation.ShowDiagnostics("补丁写入失败", result.Diagnostics);
             else
             {
                 IsDirty = false;
@@ -202,6 +214,15 @@ public sealed class PatchDocumentHostViewModel : WorkspaceMainContentViewModelBa
         }
         if (existing is null) Documents.Add(document);
         SelectedDocument = existing ?? document;
+    }
+
+    /// <summary>项目或语言切换后丢弃旧项目生成的临时 Diff，避免误写入新项目。</summary>
+    public void ClearTransientDocuments()
+    {
+        var selectedWasRemoved = SelectedDocument is DiffDocumentViewModel;
+        foreach (var document in Documents.Where(x => x.CanClose).ToArray()) Documents.Remove(document);
+        if (selectedWasRemoved || SelectedDocument is null || !Documents.Contains(SelectedDocument))
+            SelectedDocument = Documents.FirstOrDefault();
     }
 
     private void CloseDocument(PatchDocumentViewModel? document)
@@ -250,6 +271,7 @@ public sealed class PatchWorkspaceViewModel : WorkspaceViewModelBase
             var matching = Sidebar.Items.FirstOrDefault(x => x.Id == Main.SelectedDocument?.Id);
             if (matching is not null && !ReferenceEquals(Sidebar.SelectedItem, matching)) Sidebar.SelectedItem = matching;
         };
+        Session.PropertyChanged += OnSessionPropertyChanged;
     }
 
     public ProjectSessionViewModel Session { get; }
@@ -262,19 +284,45 @@ public sealed class PatchWorkspaceViewModel : WorkspaceViewModelBase
     public override WorkspaceMainContentViewModelBase MainContent => Main;
     public override WorkspaceInspectorViewModelBase InspectorContent => Inspector;
 
+    private void OnSessionPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs args)
+    {
+        if (args.PropertyName is not (nameof(ProjectSessionViewModel.ProjectPath) or nameof(ProjectSessionViewModel.Language))) return;
+        Main.ClearTransientDocuments();
+        Inspector.Document = Main.SelectedDocument;
+    }
+
     public Task PreviewModuleAsync(string sourceId, PatchModule module) => PreviewModulesAsync(sourceId, [module]);
 
     public async Task PreviewModulesAsync(string sourceId, IReadOnlyList<PatchModule> modules)
     {
         var root = _fileSystem.ValidateProjectRoot(Session.ProjectPath);
         if (!root.IsSuccess || root.Value is null) { Confirmation.ShowDiagnostics("项目路径无效", root.Diagnostics); return; }
-        var relative = $"game/tl/{Session.Language}/zzz.rpy";
+        var projectPath = Session.ProjectPath;
+        var language = Session.Language;
+        var relative = ProjectLayout.UnderGame(root.Value, "tl", language, "zzz.rpy");
         var request = new ManagedPatchRequest(root.Value, relative, modules);
         await Session.Tasks.RunAsync("正在生成补丁差异……", async token =>
         {
             var preview = await PatchService.PreviewAsync(request, Session.Tasks.CreateProgress(), token);
-            if (!preview.IsSuccess || preview.Value is null) { Confirmation.ShowDiagnostics("补丁预览失败", preview.Diagnostics); return; }
-            var document = new DiffDocumentViewModel(this, $"diff:{sourceId}:{relative}", $"Diff · {sourceId}", request, preview.Value);
+            if (!preview.IsSuccess || preview.Value is null)
+            {
+                if (preview.Status == OperationStatus.Cancelled) Session.Tasks.StatusMessage = "补丁预览已取消。";
+                else Confirmation.ShowDiagnostics("补丁预览失败", preview.Diagnostics);
+                return;
+            }
+            if (!string.Equals(projectPath, Session.ProjectPath, StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(language, Session.Language, StringComparison.OrdinalIgnoreCase))
+            {
+                Session.Tasks.StatusMessage = "项目或语言已切换，已丢弃旧补丁预览。";
+                return;
+            }
+
+            var requestWithBaseline = request with
+            {
+                ExpectedSha256 = preview.Value.OriginalSha256,
+                RequireTargetMissing = !preview.Value.TargetExists
+            };
+            var document = new DiffDocumentViewModel(this, $"diff:{sourceId}:{relative}", $"Diff · {sourceId}", requestWithBaseline, preview.Value);
             Main.AddOrActivate(document);
             Inspector.Document = document;
             Session.Tasks.StatusMessage = preview.Value.OriginalText == preview.Value.UpdatedText ? "补丁已是最新状态。" : "差异已生成，请审阅后应用。";

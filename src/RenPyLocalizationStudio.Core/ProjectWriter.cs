@@ -11,7 +11,24 @@ public sealed record ProjectSaveRequest(
     bool RefreshAnnotations,
     bool AllowWarnings,
     bool ForceOverwrite = false);
-public sealed record SaveSummary(int SavedFiles);
+public enum SaveFileStatus
+{
+    Saved,
+    Failed,
+    Cancelled
+}
+
+public sealed record SaveFileCommit(
+    string RelativePath,
+    SaveFileStatus Status,
+    string? Sha256,
+    bool BackupCreated,
+    IReadOnlyList<Diagnostic> Diagnostics);
+
+public sealed record SaveSummary(IReadOnlyList<SaveFileCommit> Files)
+{
+    public int SavedFiles => Files.Count(file => file.Status == SaveFileStatus.Saved);
+}
 public interface IProjectSaveService : IAsyncOperationService<ProjectSaveRequest, SaveSummary>
 {
     IReadOnlyList<Diagnostic> Validate(ProjectSnapshot snapshot);
@@ -71,10 +88,14 @@ public sealed class ProjectWriter : IProjectSaveService
             return new OperationResult<SaveSummary>(OperationStatus.Failed, null, rootResult.Diagnostics);
         }
 
-        var savedFiles = 0;
+        var commits = new List<SaveFileCommit>();
         foreach (var document in snapshot.TlDocuments)
         {
-            cancellationToken.ThrowIfCancellationRequested();
+            if (cancellationToken.IsCancellationRequested)
+            {
+                diagnostics.Add(new Diagnostic(DiagnosticSeverity.Info, "SAVE_CANCELLED", "保存已取消；已完成文件的提交结果仍然有效。"));
+                return new OperationResult<SaveSummary>(OperationStatus.Cancelled, new SaveSummary(commits), diagnostics);
+            }
             var hasDirtyUnits = document.Units.Any(unit => unit.IsDirty);
             if (!hasDirtyUnits && !request.RefreshAnnotations)
             {
@@ -86,12 +107,29 @@ public sealed class ProjectWriter : IProjectSaveService
             if (!targetResult.IsSuccess || targetResult.Value is null)
             {
                 diagnostics.AddRange(targetResult.Diagnostics);
+                commits.Add(new SaveFileCommit(document.RelativePath, SaveFileStatus.Failed, null, false, targetResult.Diagnostics));
                 continue;
             }
 
-            var cleanText = RemoveManagedSections(document.File.Text);
+            var baselineText = string.IsNullOrEmpty(document.BaselineText) ? document.File.Text : document.BaselineText;
+            var expectedSha256 = string.IsNullOrEmpty(document.BaselineSha256) ? document.File.Sha256 : document.BaselineSha256;
+            if (!TryRemoveManagedSections(baselineText, out var cleanText))
+            {
+                var markerDiagnostic = new Diagnostic(
+                    DiagnosticSeverity.Error,
+                    "RFT_FLOW_MARKER_UNBALANCED",
+                    "受管流程注释的 BEGIN/END 标记不配对，已拒绝保存以避免截断文件。",
+                    document.RelativePath,
+                    Category: DiagnosticCategory.Parsing);
+                diagnostics.Add(markerDiagnostic);
+                commits.Add(new SaveFileCommit(document.RelativePath, SaveFileStatus.Failed, null, false, [markerDiagnostic]));
+                continue;
+            }
             var cleanFile = CloneWithText(document.File, cleanText);
             var reparsed = _tlParser.Parse(cleanFile, document.RelativePath, snapshot.Language);
+            var savedStates = document.Units.ToDictionary(
+                unit => unit,
+                unit => new SavedUnitState(unit.TranslationText, unit.RawBodyText, unit.IsDirty));
             var editedText = ApplyTranslations(cleanText, document, reparsed, document.File.NewLine);
             if (request.RefreshAnnotations)
             {
@@ -106,17 +144,40 @@ public sealed class ProjectWriter : IProjectSaveService
                 new AtomicWriteRequest(
                     targetResult.Value,
                     document.File.Encode(editedText),
-                    request.ForceOverwrite ? null : document.File.Sha256),
+                    request.ForceOverwrite ? null : expectedSha256),
                 progress,
                 cancellationToken).ConfigureAwait(false);
             if (!write.IsSuccess)
             {
-                diagnostics.AddRange(write.Diagnostics.Select(diagnostic => diagnostic.Code == "EXTERNAL_MODIFICATION"
+                var fileDiagnostics = write.Diagnostics.Select(diagnostic => diagnostic.Code == "EXTERNAL_MODIFICATION"
                     ? diagnostic with { Code = "EXTERNAL_FILE_CHANGE" }
-                    : diagnostic));
+                    : diagnostic).ToArray();
+                diagnostics.AddRange(fileDiagnostics);
+                commits.Add(new SaveFileCommit(
+                    document.RelativePath,
+                    write.Status == OperationStatus.Cancelled ? SaveFileStatus.Cancelled : SaveFileStatus.Failed,
+                    null,
+                    false,
+                    fileDiagnostics));
+                if (write.Status == OperationStatus.Cancelled)
+                {
+                    return new OperationResult<SaveSummary>(OperationStatus.Cancelled, new SaveSummary(commits), diagnostics);
+                }
                 continue;
             }
-            savedFiles++;
+            document.BaselineText = editedText;
+            document.BaselineSha256 = write.Value!.Sha256;
+            foreach (var (unit, savedState) in savedStates)
+            {
+                // I/O 等待期间仍允许编辑；只有与本次写入快照完全一致的条目才可清除脏标记。
+                if (savedState.WasDirty &&
+                    unit.TranslationText == savedState.TranslationText &&
+                    unit.RawBodyText == savedState.RawBodyText)
+                {
+                    unit.IsDirty = false;
+                }
+            }
+            commits.Add(new SaveFileCommit(document.RelativePath, SaveFileStatus.Saved, write.Value.Sha256, write.Value.BackupCreated, []));
         }
 
         var status = diagnostics.Any(x => x.Severity == DiagnosticSeverity.Error)
@@ -124,13 +185,27 @@ public sealed class ProjectWriter : IProjectSaveService
             : diagnostics.Any(x => x.Severity == DiagnosticSeverity.Warning)
                 ? OperationStatus.SucceededWithWarnings
                 : OperationStatus.Succeeded;
-        progress.Report(ToolOperationProgress.Create(ToolOperationStage.Completed, $"已保存 {savedFiles} 个文件", savedFiles, savedFiles));
-        return new OperationResult<SaveSummary>(status, new SaveSummary(savedFiles), diagnostics);
+        var summary = new SaveSummary(commits);
+        progress.Report(ToolOperationProgress.Create(ToolOperationStage.Completed, $"已保存 {summary.SavedFiles} 个文件", summary.SavedFiles, commits.Count));
+        return new OperationResult<SaveSummary>(status, summary, diagnostics);
     }
 
     public IReadOnlyList<Diagnostic> Validate(ProjectSnapshot snapshot)
     {
         var diagnostics = new List<Diagnostic>();
+        foreach (var group in snapshot.TranslationUnits
+                     .Where(unit => unit.Kind == TranslationUnitKind.Dialogue && !string.IsNullOrWhiteSpace(unit.Identifier))
+                     .GroupBy(unit => unit.Identifier!, StringComparer.Ordinal)
+                     .Where(group => group.Count() > 1))
+        {
+            diagnostics.AddRange(group.Select(unit => new Diagnostic(
+                DiagnosticSeverity.Error,
+                "DUPLICATE_DIALOGUE_ID",
+                $"dialogue 翻译 ID {group.Key} 存在重复定义，无法安全保存。",
+                unit.RelativeTlPath,
+                unit.HeaderLine,
+                DiagnosticCategory.Parsing)));
+        }
         foreach (var unit in snapshot.TranslationUnits.Where(unit => unit.IsDirty))
         {
             if (unit.IsRawMode)
@@ -168,7 +243,14 @@ public sealed class ProjectWriter : IProjectSaveService
             TranslationUnit? target;
             if (dirty.Kind == TranslationUnitKind.Dialogue)
             {
-                target = reparsed.Units.FirstOrDefault(unit => unit.Kind == TranslationUnitKind.Dialogue && unit.Identifier == dirty.Identifier);
+                var occurrence = original.Units
+                    .Where(unit => unit.Kind == TranslationUnitKind.Dialogue && unit.Identifier == dirty.Identifier)
+                    .TakeWhile(unit => unit != dirty)
+                    .Count();
+                target = reparsed.Units
+                    .Where(unit => unit.Kind == TranslationUnitKind.Dialogue && unit.Identifier == dirty.Identifier)
+                    .Skip(occurrence)
+                    .FirstOrDefault();
             }
             else
             {
@@ -265,7 +347,7 @@ public sealed class ProjectWriter : IProjectSaveService
         return BeginMarker + newLine + $"# [流程] {node.Region.RelativePath}:{node.Region.StartLine} {detail}" + newLine + EndMarker + newLine;
     }
 
-    private static string RemoveManagedSections(string text)
+    private static bool TryRemoveManagedSections(string text, out string cleanedText)
     {
         var lines = TextUtilities.SliceLines(text);
         var builder = new StringBuilder(text.Length);
@@ -280,8 +362,19 @@ public sealed class ProjectWriter : IProjectSaveService
                 continue;
             }
 
+            if (!inManaged && lexicalState.IsNeutral && trimmed == EndMarker)
+            {
+                cleanedText = text;
+                return false;
+            }
+
             if (inManaged)
             {
+                if (lexicalState.IsNeutral && trimmed == BeginMarker)
+                {
+                    cleanedText = text;
+                    return false;
+                }
                 if (lexicalState.IsNeutral && trimmed == EndMarker)
                 {
                     inManaged = false;
@@ -294,7 +387,14 @@ public sealed class ProjectWriter : IProjectSaveService
             lexicalState.Consume(line.Content);
         }
 
-        return builder.ToString();
+        if (inManaged)
+        {
+            cleanedText = text;
+            return false;
+        }
+
+        cleanedText = builder.ToString();
+        return true;
     }
 
     private static bool IsBoundary(FlowNodeKind kind)
@@ -323,16 +423,7 @@ public sealed class ProjectWriter : IProjectSaveService
     };
 
     private static string? ExtractSourceText(string? statement)
-    {
-        if (statement is null)
-        {
-            return null;
-        }
-
-        var last = statement.LastIndexOf('"');
-        var first = last > 0 ? statement.LastIndexOf('"', last - 1) : -1;
-        return first >= 0 ? TextUtilities.UnescapeRenPyString(statement[(first + 1)..last]) : null;
-    }
+        => statement is null ? null : TextUtilities.ExtractLastQuotedString(statement);
 
     private static bool ValidateRawBody(string body)
     {
@@ -357,6 +448,7 @@ public sealed class ProjectWriter : IProjectSaveService
     }
 
     private sealed record TextEdit(int Start, int Length, string Replacement);
+    private sealed record SavedUnitState(string TranslationText, string RawBodyText, bool WasDirty);
 
     private sealed class RenPyStringState
     {

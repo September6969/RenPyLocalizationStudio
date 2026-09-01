@@ -35,6 +35,22 @@ public sealed class RenPySdkServiceTests
         Assert.True(process.ObservedCancellation);
     }
 
+    [Fact]
+    public async Task Execute_选择Game目录时向Sdk传递项目父目录()
+    {
+        var process = new FakeProcessRunner();
+        var service = new RenPySdkService(new InMemoryFileSystem("C:\\project\\game"), process);
+        var request = new SdkTranslationRequest(
+            "C:\\project\\game", "schinese", new SdkInstallation("C:\\tools", "C:\\tools\\renpy.exe", "8.5.2"),
+            false, false, false, false);
+
+        var result = await service.ExecuteAsync(request, new Progress<ToolOperationProgress>(), CancellationToken.None);
+
+        Assert.Equal(OperationStatus.Succeeded, result.Status);
+        Assert.Equal("C:\\project", process.LastPlan?.Arguments[0]);
+        Assert.Equal(["C:\\project", "translate", "schinese"], process.LastPlan?.Arguments);
+    }
+
     private sealed class FakeProcessRunner : IProcessRunnerService
     {
         public ProcessExecutionPlan? LastPlan { get; private set; }

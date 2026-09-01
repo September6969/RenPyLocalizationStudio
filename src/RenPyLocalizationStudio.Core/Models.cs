@@ -24,6 +24,7 @@ public enum FlowEdgeKind
     Jump,
     Call,
     Contains,
+    Return,
     End
 }
 
@@ -87,6 +88,7 @@ public sealed class FlowNode
     public string? Condition { get; init; }
     public string? OriginalText { get; init; }
     public string? ParentId { get; init; }
+    public string? BranchGroupId { get; init; }
     public int Indent { get; init; }
     public bool IsDynamic { get; init; }
 }
@@ -98,6 +100,8 @@ public sealed class FlowGraph
     public List<FlowNode> Nodes { get; } = [];
     public List<FlowEdge> Edges { get; } = [];
     public Dictionary<string, FlowNode> Labels { get; } = new(StringComparer.Ordinal);
+    /// <summary>call 节点到调用返回后继续节点的映射；用于跨文件合并后补全 return 边。</summary>
+    public Dictionary<string, string> CallContinuations { get; } = new(StringComparer.Ordinal);
 }
 
 public sealed record Diagnostic(
@@ -159,6 +163,10 @@ public sealed class TlDocument
     public required Utf8TextFile File { get; init; }
     public required string Language { get; init; }
     public required string RelativePath { get; init; }
+    /// <summary>最近一次成功写入后的逻辑文本基线；用于自动保存时继续累积译文。</summary>
+    public string BaselineText { get; set; } = string.Empty;
+    /// <summary>最近一次成功写入后的文件哈希；避免把程序自身写入误判为外部修改。</summary>
+    public string BaselineSha256 { get; set; } = string.Empty;
     public List<TranslationUnit> Units { get; } = [];
     public List<Diagnostic> Diagnostics { get; } = [];
 }

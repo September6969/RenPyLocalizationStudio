@@ -73,12 +73,19 @@ public sealed class ToolLogEntry(string message, string level = "Info")
 
 public sealed class TaskCenterViewModel : ObservableObject
 {
+    private readonly object _runSync = new();
+    private readonly SynchronizationContext? _synchronizationContext;
     private CancellationTokenSource? _cancellation;
+    private Task _activeTask = Task.CompletedTask;
     private bool _isBusy;
     private string _statusMessage = "请选择 Ren’Py 项目目录。";
     private double? _percentage;
 
-    public TaskCenterViewModel() => CancelCommand = new RelayCommand(Cancel, () => IsBusy);
+    public TaskCenterViewModel(SynchronizationContext? synchronizationContext = null)
+    {
+        _synchronizationContext = synchronizationContext ?? SynchronizationContext.Current;
+        CancelCommand = new RelayCommand(Cancel, () => IsBusy);
+    }
 
     public ObservableCollection<ToolLogEntry> Logs { get; } = [];
     public IRelayCommand CancelCommand { get; }
@@ -105,7 +112,7 @@ public sealed class TaskCenterViewModel : ObservableObject
     }
 
     public IProgress<RenPyLocalizationStudio.Core.Services.ToolOperationProgress> CreateProgress() =>
-        new Progress<RenPyLocalizationStudio.Core.Services.ToolOperationProgress>(update =>
+        new Progress<RenPyLocalizationStudio.Core.Services.ToolOperationProgress>(update => PostToUi(() =>
         {
             StatusMessage = update.TotalItems is > 0
                 ? $"{update.Message}  {update.CompletedItems:N0}/{update.TotalItems:N0}"
@@ -113,36 +120,166 @@ public sealed class TaskCenterViewModel : ObservableObject
             Percentage = update.Percentage;
             Logs.Add(new ToolLogEntry(update.RelativePath is null ? update.Message : $"{update.Message} · {update.RelativePath}", update.Level.ToString()));
             while (Logs.Count > 500) Logs.RemoveAt(0);
-        });
+        }));
 
     public async Task RunAsync(string initialStatus, Func<CancellationToken, Task> operation)
     {
-        _cancellation?.Cancel();
-        _cancellation?.Dispose();
-        _cancellation = new CancellationTokenSource();
-        IsBusy = true;
-        Percentage = null;
-        StatusMessage = initialStatus;
-        Logs.Add(new ToolLogEntry(initialStatus));
+        CancellationTokenSource cancellation;
+        Task previous;
+        Task current;
+        lock (_runSync)
+        {
+            // 取消旧操作但不要立即 Dispose；旧操作可能仍在注册取消回调或释放文件流。
+            _cancellation?.Cancel();
+            previous = _activeTask;
+            cancellation = new CancellationTokenSource();
+            _cancellation = cancellation;
+            current = RunCoreAsync(previous, initialStatus, operation, cancellation);
+            _activeTask = current;
+        }
+
+        await current;
+    }
+
+    /// <summary>关闭窗口或切换项目时取消并等待当前任务完成，确保不会留下后台写入。</summary>
+    public async Task CancelAndWaitAsync(CancellationToken cancellationToken = default)
+    {
+        Task current;
+        lock (_runSync)
+        {
+            _cancellation?.Cancel();
+            current = _activeTask;
+        }
+
+        try { await current.WaitAsync(cancellationToken).ConfigureAwait(false); }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested) { }
+    }
+
+    private async Task RunCoreAsync(
+        Task previous,
+        string initialStatus,
+        Func<CancellationToken, Task> operation,
+        CancellationTokenSource cancellation)
+    {
         try
         {
-            await operation(_cancellation.Token);
+            await RunOnUiAsync(() =>
+            {
+                lock (_runSync)
+                {
+                    if (!ReferenceEquals(_cancellation, cancellation)) return;
+                    IsBusy = true;
+                    Percentage = null;
+                    StatusMessage = initialStatus;
+                    Logs.Add(new ToolLogEntry(initialStatus));
+                }
+            });
+            // 同一 TaskCenter 的操作不并发执行；取消旧操作后仍等待其释放文件流，再开始新操作。
+            await previous.ConfigureAwait(false);
+            cancellation.Token.ThrowIfCancellationRequested();
+            await RunOnUiAsync(() => operation(cancellation.Token));
         }
         catch (OperationCanceledException)
         {
-            StatusMessage = "操作已取消。";
-            Logs.Add(new ToolLogEntry(StatusMessage, "Warning"));
+            await RunOnUiAsync(() =>
+            {
+                lock (_runSync)
+                {
+                    if (ReferenceEquals(_cancellation, cancellation))
+                    {
+                        StatusMessage = "操作已取消。";
+                        Logs.Add(new ToolLogEntry(StatusMessage, "Warning"));
+                    }
+                }
+            });
         }
         catch (Exception exception)
         {
-            StatusMessage = $"操作失败：{exception.Message}";
-            Logs.Add(new ToolLogEntry(StatusMessage, "Error"));
+            await RunOnUiAsync(() =>
+            {
+                lock (_runSync)
+                {
+                    if (ReferenceEquals(_cancellation, cancellation))
+                    {
+                        StatusMessage = $"操作失败：{exception.Message}";
+                        Logs.Add(new ToolLogEntry(StatusMessage, "Error"));
+                    }
+                }
+            });
         }
         finally
         {
-            IsBusy = false;
+            await RunOnUiAsync(() =>
+            {
+                lock (_runSync)
+                {
+                    // 新操作已经接管状态时，旧操作不得把 Busy 误清掉。
+                    if (ReferenceEquals(_cancellation, cancellation))
+                    {
+                        _cancellation = null;
+                        _activeTask = Task.CompletedTask;
+                        IsBusy = false;
+                    }
+                }
+            });
+            cancellation.Dispose();
         }
     }
 
-    private void Cancel() => _cancellation?.Cancel();
+    private Task RunOnUiAsync(Action action)
+    {
+        if (_synchronizationContext is null || ReferenceEquals(SynchronizationContext.Current, _synchronizationContext))
+        {
+            action();
+            return Task.CompletedTask;
+        }
+
+        var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _synchronizationContext.Post(static state =>
+        {
+            var invocation = (UiActionInvocation)state!;
+            try
+            {
+                invocation.Action();
+                invocation.Completion.SetResult();
+            }
+            catch (Exception exception) { invocation.Completion.SetException(exception); }
+        }, new UiActionInvocation(action, completion));
+        return completion.Task;
+    }
+
+    private Task RunOnUiAsync(Func<Task> action)
+    {
+        if (_synchronizationContext is null || ReferenceEquals(SynchronizationContext.Current, _synchronizationContext))
+            return action();
+
+        var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _synchronizationContext.Post(async state =>
+        {
+            var invocation = (UiAsyncInvocation)state!;
+            try
+            {
+                await invocation.Action();
+                invocation.Completion.SetResult();
+            }
+            catch (Exception exception) { invocation.Completion.SetException(exception); }
+        }, new UiAsyncInvocation(action, completion));
+        return completion.Task;
+    }
+
+    private void PostToUi(Action action)
+    {
+        if (_synchronizationContext is null || ReferenceEquals(SynchronizationContext.Current, _synchronizationContext))
+            action();
+        else
+            _synchronizationContext.Post(static state => ((Action)state!).Invoke(), action);
+    }
+
+    private sealed record UiActionInvocation(Action Action, TaskCompletionSource Completion);
+    private sealed record UiAsyncInvocation(Func<Task> Action, TaskCompletionSource Completion);
+
+    private void Cancel()
+    {
+        lock (_runSync) _cancellation?.Cancel();
+    }
 }

@@ -11,7 +11,8 @@ public sealed record ProcessExecutionPlan(
     TimeSpan Timeout,
     TimeSpan IdleWarningThreshold,
     TimeSpan CancellationGracePeriod,
-    bool KillEntireProcessTree = true);
+    bool KillEntireProcessTree = true,
+    int MaxCapturedOutputCharacters = 1_000_000);
 
 public sealed record ProcessExecutionSummary(int ExitCode, string StandardOutput, string StandardError, TimeSpan Duration, bool TimedOut);
 
@@ -25,9 +26,8 @@ public sealed class ProcessRunnerService : IProcessRunnerService
         CancellationToken cancellationToken)
     {
         var diagnostics = new ConcurrentQueue<Diagnostic>();
-        var stdout = new List<string>();
-        var stderr = new List<string>();
-        var gate = new object();
+        var stdout = new BoundedLineBuffer(request.MaxCapturedOutputCharacters);
+        var stderr = new BoundedLineBuffer(request.MaxCapturedOutputCharacters);
         var lastOutput = DateTimeOffset.UtcNow;
         var stopwatch = Stopwatch.StartNew();
 
@@ -45,7 +45,14 @@ public sealed class ProcessRunnerService : IProcessRunnerService
                 StandardErrorEncoding = System.Text.Encoding.UTF8
             };
             foreach (var argument in request.Arguments) startInfo.ArgumentList.Add(argument);
-            foreach (var (key, value) in request.Environment) startInfo.Environment[key] = value;
+            // 外部工具只能看到执行计划明确允许的变量，避免继承令牌、代理和用户 PATH。
+            startInfo.Environment.Clear();
+            foreach (var (key, value) in request.Environment)
+            {
+                if (string.IsNullOrWhiteSpace(key) || key.Contains('=') || key.Contains('\0'))
+                    return OperationResult<ProcessExecutionSummary>.Failure(ProcessDiagnostic("PROCESS_ENVIRONMENT_INVALID", "外部进程环境变量名称无效。"));
+                if (value is not null) startInfo.Environment[key] = value;
+            }
 
             using var process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
             progress.Report(ToolOperationProgress.Create(ToolOperationStage.StartingProcess, $"启动 {Path.GetFileName(request.Executable.FullPath)}"));
@@ -54,11 +61,11 @@ public sealed class ProcessRunnerService : IProcessRunnerService
                 return OperationResult<ProcessExecutionSummary>.Failure(ProcessDiagnostic("PROCESS_START_FAILED", "外部进程未能启动。"));
             }
 
-            async Task DrainAsync(StreamReader reader, List<string> target, ToolLogLevel level)
+            async Task DrainAsync(StreamReader reader, BoundedLineBuffer target, ToolLogLevel level)
             {
                 while (await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false) is { } line)
                 {
-                    lock (gate) target.Add(line);
+                    target.Add(line);
                     lastOutput = DateTimeOffset.UtcNow;
                     progress.Report(ToolOperationProgress.Create(ToolOperationStage.RunningProcess, line, level: level));
                 }
@@ -92,15 +99,26 @@ public sealed class ProcessRunnerService : IProcessRunnerService
                 if (timeoutCts.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
                 {
                     return new OperationResult<ProcessExecutionSummary>(OperationStatus.Failed,
-                        new ProcessExecutionSummary(-1, string.Join(Environment.NewLine, stdout), string.Join(Environment.NewLine, stderr), stopwatch.Elapsed, true),
+                        new ProcessExecutionSummary(-1, stdout.Text, stderr.Text, stopwatch.Elapsed, true),
                         [.. diagnostics, ProcessDiagnostic("PROCESS_TIMEOUT", $"外部工具运行超过 {request.Timeout.TotalMinutes:0.#} 分钟，已终止。")]);
                 }
                 return OperationResult<ProcessExecutionSummary>.Cancelled(ProcessDiagnostic("PROCESS_CANCELLED", "外部工具已取消。", DiagnosticSeverity.Info));
             }
 
-            await Task.WhenAll(stdoutTask, stderrTask).ConfigureAwait(false);
+            try
+            {
+                await Task.WhenAll(stdoutTask, stderrTask).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                stopwatch.Stop();
+                return OperationResult<ProcessExecutionSummary>.Cancelled(
+                    ProcessDiagnostic("PROCESS_CANCELLED", "外部工具已取消。", DiagnosticSeverity.Info));
+            }
             stopwatch.Stop();
-            var summary = new ProcessExecutionSummary(process.ExitCode, string.Join(Environment.NewLine, stdout), string.Join(Environment.NewLine, stderr), stopwatch.Elapsed, false);
+            if (stdout.WasTruncated || stderr.WasTruncated)
+                diagnostics.Enqueue(ProcessDiagnostic("PROCESS_OUTPUT_TRUNCATED", "外部工具输出过多，仅保留最近部分；实时日志未受影响。", DiagnosticSeverity.Warning));
+            var summary = new ProcessExecutionSummary(process.ExitCode, stdout.Text, stderr.Text, stopwatch.Elapsed, false);
             if (process.ExitCode != 0)
             {
                 return new OperationResult<ProcessExecutionSummary>(OperationStatus.Failed, summary,
@@ -120,8 +138,8 @@ public sealed class ProcessRunnerService : IProcessRunnerService
         try
         {
             if (process.HasExited) return;
-            process.CloseMainWindow();
-            if (process.WaitForExit((int)Math.Max(0, plan.CancellationGracePeriod.TotalMilliseconds))) return;
+            if (process.MainWindowHandle != IntPtr.Zero && process.CloseMainWindow() &&
+                process.WaitForExit((int)Math.Max(0, plan.CancellationGracePeriod.TotalMilliseconds))) return;
             process.Kill(plan.KillEntireProcessTree);
             process.WaitForExit();
         }
@@ -129,4 +147,37 @@ public sealed class ProcessRunnerService : IProcessRunnerService
     }
     private static Diagnostic ProcessDiagnostic(string code, string message, DiagnosticSeverity severity = DiagnosticSeverity.Error) =>
         new(severity, code, message, Category: DiagnosticCategory.Process);
+
+    private sealed class BoundedLineBuffer
+    {
+        private readonly int _limit;
+        private readonly Queue<string> _lines = new();
+        private readonly object _gate = new();
+        private int _length;
+
+        public BoundedLineBuffer(int limit) => _limit = Math.Max(4096, limit);
+        public bool WasTruncated { get; private set; }
+        public string Text
+        {
+            get
+            {
+                lock (_gate) return string.Join(Environment.NewLine, _lines);
+            }
+        }
+
+        public void Add(string line)
+        {
+            lock (_gate)
+            {
+                _lines.Enqueue(line);
+                _length += line.Length + Environment.NewLine.Length;
+                while (_length > _limit && _lines.Count > 1)
+                {
+                    var removed = _lines.Dequeue();
+                    _length -= removed.Length + Environment.NewLine.Length;
+                    WasTruncated = true;
+                }
+            }
+        }
+    }
 }

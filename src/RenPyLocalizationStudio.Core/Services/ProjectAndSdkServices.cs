@@ -35,8 +35,9 @@ public sealed class ProjectAnalysisService : IProjectAnalysisService
                 return new OperationResult<ProjectSnapshot>(allFiles.Status, null, allFiles.Diagnostics);
             }
 
-            var languagePrefix = TextUtilities.NormalizePath(Path.Combine(gameRelative, "tl", request.Language)).TrimEnd('/') + "/";
-            var tlPrefix = TextUtilities.NormalizePath(Path.Combine(gameRelative, "tl")).TrimEnd('/') + "/";
+            var tlRelative = gameRelative == "." ? "tl" : Path.Combine(gameRelative, "tl");
+            var languagePrefix = TextUtilities.NormalizePath(Path.Combine(tlRelative, request.Language)).TrimEnd('/') + "/";
+            var tlPrefix = TextUtilities.NormalizePath(tlRelative).TrimEnd('/') + "/";
             var sourcePaths = allFiles.Value
                 .Where(path => !TextUtilities.NormalizePath(path.RelativePath).StartsWith(tlPrefix, StringComparison.OrdinalIgnoreCase))
                 .OrderBy(path => path.RelativePath, StringComparer.OrdinalIgnoreCase)
@@ -171,7 +172,10 @@ public sealed class RenPySdkService : IRenPySdkService
                 list.Add(new SdkInstallation(Path.GetFullPath(root), Path.GetFullPath(exe), version));
                 progress.Report(ToolOperationProgress.Create(ToolOperationStage.Scanning, $"发现 Ren’Py SDK {version}", list.Count, null, root));
             }
-            return OperationResult<IReadOnlyList<SdkInstallation>>.Success(list.OrderByDescending(x => x.DisplayVersion, StringComparer.OrdinalIgnoreCase).ToArray());
+            return OperationResult<IReadOnlyList<SdkInstallation>>.Success(list
+                .OrderByDescending(x => ParseSdkVersion(x.DisplayVersion))
+                .ThenByDescending(x => x.DisplayVersion, StringComparer.OrdinalIgnoreCase)
+                .ToArray());
         }
         catch (OperationCanceledException) { return OperationResult<IReadOnlyList<SdkInstallation>>.Cancelled(new Diagnostic(DiagnosticSeverity.Info, "SDK_DISCOVERY_CANCELLED", "SDK 检测已取消。")); }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
@@ -187,7 +191,17 @@ public sealed class RenPySdkService : IRenPySdkService
         var root = _fileSystem.ValidateProjectRoot(request.ProjectRoot);
         if (!root.IsSuccess || root.Value is null) return new(OperationStatus.Failed, null, root.Diagnostics);
 
-        var args = new List<string> { request.ProjectRoot, "translate", request.Language };
+        var launchRoot = root.Value.FullPath;
+        if (ProjectLayout.RootIsGameDirectory(root.Value))
+        {
+            var parent = Directory.GetParent(launchRoot);
+            if (parent is null)
+                return OperationResult<SdkTranslationSummary>.Failure(new Diagnostic(DiagnosticSeverity.Error,
+                    "PROJECT_PARENT_MISSING", "选择 game 目录时无法确定 Ren’Py 项目父目录。", launchRoot,
+                    Category: DiagnosticCategory.Sdk));
+            launchRoot = parent.FullName;
+        }
+        var args = new List<string> { launchRoot, "translate", request.Language };
         if (request.CountOnly) args.Add("--count");
         if (request.Empty) args.Add("--empty");
         if (request.StringsOnly) args.Add("--strings-only");
@@ -200,4 +214,9 @@ public sealed class RenPySdkService : IRenPySdkService
         return new(process.Status, summary, process.Diagnostics);
     }
     private static string Quote(string value) => value.Contains(' ') ? $"\"{value.Replace("\"", "\\\"")}\"" : value;
+    private static Version ParseSdkVersion(string value)
+    {
+        var numeric = new string(value.TakeWhile(character => char.IsDigit(character) || character == '.').ToArray()).TrimEnd('.');
+        return Version.TryParse(numeric, out var version) ? version : new Version(0, 0);
+    }
 }

@@ -18,7 +18,7 @@ public sealed class MainViewModel : ObservableObject, IRecipient<NavigateToSourc
     private string _accentColor;
     private Brush _accentPreviewBrush;
     private string? _restoredPositionKey;
-    private Task? _shutdownTask;
+    private Task<bool>? _shutdownTask;
 
     public MainViewModel(
         ProjectSessionViewModel session,
@@ -110,8 +110,21 @@ public sealed class MainViewModel : ObservableObject, IRecipient<NavigateToSourc
     }
 
     /// <summary>在窗口真正关闭前冲刷自动保存和最后访问位置，避免同步等待 UI 死锁。</summary>
-    public Task ShutdownAsync(CancellationToken cancellationToken = default) =>
+    public async Task<bool> ShutdownAsync(CancellationToken cancellationToken = default)
+    {
         _shutdownTask ??= ShutdownCoreAsync(cancellationToken);
+        try
+        {
+            var canClose = await _shutdownTask;
+            if (!canClose) _shutdownTask = null;
+            return canClose;
+        }
+        catch
+        {
+            _shutdownTask = null;
+            throw;
+        }
+    }
 
     private void OnSessionPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs args)
     {
@@ -149,17 +162,21 @@ public sealed class MainViewModel : ObservableObject, IRecipient<NavigateToSourc
             TimeSpan.FromMilliseconds(180),
             Session.PersistSettingsAsync);
 
-    private async Task ShutdownCoreAsync(CancellationToken cancellationToken)
+    private async Task<bool> ShutdownCoreAsync(CancellationToken cancellationToken)
     {
-        if (Tasks.CancelCommand.CanExecute(null)) Tasks.CancelCommand.Execute(null);
+        await Tasks.CancelAndWaitAsync(cancellationToken);
         Session.UpdateLastTranslationPosition(
             TranslationWorkspace.SelectedItem?.Key ?? TranslationWorkspace.ScrollAnchor?.ItemId,
             TranslationWorkspace.ViewMode.ToString(),
             TranslationWorkspace.GroupingMode.ToString());
-        await _taskCoordinator.CancelAsync("settings-save");
-        await Session.FlushAutoSaveAsync(cancellationToken);
+        await _taskCoordinator.CancelAsync("settings-save", cancellationToken);
+        var saved = await Session.FlushAutoSaveAsync(cancellationToken);
+        if (!saved && !Session.ConfirmDiscardUnsavedChanges("关闭程序")) return false;
         await Session.PersistSettingsAsync(cancellationToken);
-        await _taskCoordinator.CancelAsync("workspace-activation");
+        await _taskCoordinator.CancelAsync("workspace-activation", cancellationToken);
+        await TranslationWorkspace.StopPreviewAsync(cancellationToken);
+        await _taskCoordinator.CancelAllAsync(cancellationToken);
+        return true;
     }
 
     private static async Task ChangeWorkspaceAsync(WorkspaceViewModelBase? previous, WorkspaceViewModelBase current, CancellationToken cancellationToken)

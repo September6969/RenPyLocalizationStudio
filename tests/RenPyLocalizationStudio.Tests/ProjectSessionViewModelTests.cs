@@ -9,6 +9,27 @@ namespace RenPyLocalizationStudio.Tests;
 public sealed class ProjectSessionViewModelTests
 {
     [Fact]
+    public async Task Settings_损坏Json返回明确诊断和默认值()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "rls-settings-tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        var path = Path.Combine(directory, "settings.json");
+        await File.WriteAllTextAsync(path, "{ invalid json");
+        try
+        {
+            var result = await new AppSettingsStore(path).LoadAsync(CancellationToken.None);
+
+            Assert.Equal(OperationStatus.Failed, result.Status);
+            Assert.Equal("#D16BA5", result.Value?.AccentColor);
+            Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == "SETTINGS_JSON_INVALID");
+        }
+        finally
+        {
+            Directory.Delete(directory, true);
+        }
+    }
+
+    [Fact]
     public async Task 切换语言立即清除旧快照并禁用保存()
     {
         await using var project = await TestFiles.CreateProjectAsync(

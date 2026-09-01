@@ -9,6 +9,8 @@ TestResults/
 *.rft.tmp
 *.rls.bak
 *.tmp
+__pycache__/
+*.pyc
 
 # Ren'Py 运行生成物
 **/game/cache/

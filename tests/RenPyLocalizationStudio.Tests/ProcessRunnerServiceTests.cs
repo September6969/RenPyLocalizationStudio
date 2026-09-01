@@ -49,12 +49,44 @@ public sealed class ProcessRunnerServiceTests
         Assert.Contains(progress.Items, item => item.Level == ToolLogLevel.Warning);
     }
 
+    [Fact]
+    public async Task Execute_大量输出只保留有界尾部()
+    {
+        var result = await ExecuteAsync("flood", TimeSpan.FromSeconds(15), CancellationToken.None, maxCapturedOutputCharacters: 4096);
+
+        Assert.Equal(OperationStatus.SucceededWithWarnings, result.Status);
+        Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == "PROCESS_OUTPUT_TRUNCATED");
+        Assert.DoesNotContain("out-0\n", result.Value!.StandardOutput.Replace("\r\n", "\n", StringComparison.Ordinal));
+        Assert.Contains("out-999", result.Value.StandardOutput);
+    }
+
+    [Fact]
+    public async Task Execute_只向子进程传递白名单环境变量()
+    {
+        Environment.SetEnvironmentVariable("RLS_SHOULD_NOT_LEAK", "secret");
+        try
+        {
+            var result = await ExecuteAsync("environment", TimeSpan.FromSeconds(10), CancellationToken.None,
+                environment: new Dictionary<string, string?> { ["RLS_ALLOWED"] = "allowed" });
+
+            Assert.True(result.IsSuccess);
+            var lines = result.Value!.StandardOutput.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries);
+            Assert.Equal(["allowed", "missing-secret"], lines);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("RLS_SHOULD_NOT_LEAK", null);
+        }
+    }
+
     private static Task<OperationResult<ProcessExecutionSummary>> ExecuteAsync(
         string mode,
         TimeSpan timeout,
         CancellationToken cancellationToken,
         IProgress<ToolOperationProgress>? progress = null,
-        TimeSpan? idleWarningThreshold = null)
+        TimeSpan? idleWarningThreshold = null,
+        int maxCapturedOutputCharacters = 1_000_000,
+        IReadOnlyDictionary<string, string?>? environment = null)
     {
         var dotnet = Environment.GetEnvironmentVariable("DOTNET_HOST_PATH") ??
             Path.Combine(Environment.GetEnvironmentVariable("DOTNET_ROOT") ?? "C:\\Program Files\\dotnet", "dotnet.exe");
@@ -63,10 +95,11 @@ public sealed class ProcessRunnerServiceTests
             new ValidatedExecutablePath(dotnet),
             AppContext.BaseDirectory,
             [helper, mode],
-            new Dictionary<string, string?>(),
+            environment ?? new Dictionary<string, string?>(),
             timeout,
             idleWarningThreshold ?? TimeSpan.FromSeconds(2),
-            TimeSpan.FromMilliseconds(50));
+            TimeSpan.FromMilliseconds(50),
+            MaxCapturedOutputCharacters: maxCapturedOutputCharacters);
         return new ProcessRunnerService().ExecuteAsync(plan, progress ?? new CollectingProgress(), cancellationToken);
     }
 

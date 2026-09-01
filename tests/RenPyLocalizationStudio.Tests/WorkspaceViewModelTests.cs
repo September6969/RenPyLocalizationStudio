@@ -38,6 +38,23 @@ public sealed class WorkspaceViewModelTests
     }
 
     [Fact]
+    public void PatchDocumentHost_切换项目时清理临时Diff但保留固定文档()
+    {
+        var confirmation = new FakeConfirmationService();
+        var host = new PatchDocumentHostViewModel(confirmation);
+        var fixedDocument = new TestDocument("zzz", "zzz", canClose: false);
+        var diff = new TestDocument("diff:old", "旧项目 Diff");
+        host.Documents.Add(fixedDocument);
+        host.AddOrActivate(diff);
+
+        host.ClearTransientDocuments();
+
+        Assert.Contains(fixedDocument, host.Documents);
+        Assert.DoesNotContain(diff, host.Documents);
+        Assert.Same(fixedDocument, host.SelectedDocument);
+    }
+
+    [Fact]
     public async Task TaskCenter_取消后清理Busy状态()
     {
         var tasks = new TaskCenterViewModel();
@@ -51,6 +68,32 @@ public sealed class WorkspaceViewModelTests
         await started.Task;
         tasks.CancelCommand.Execute(null);
         await run;
+
+        Assert.False(tasks.IsBusy);
+        Assert.Equal("操作已取消。", tasks.StatusMessage);
+    }
+
+    [Fact]
+    public async Task TaskCenter_新任务不会被旧任务的finally清除Busy状态()
+    {
+        var tasks = new TaskCenterViewModel();
+        var firstStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var firstCleanup = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var first = tasks.RunAsync("第一个任务", async token =>
+        {
+            firstStarted.SetResult();
+            try { await Task.Delay(Timeout.InfiniteTimeSpan, token); }
+            finally { await firstCleanup.Task; }
+        });
+
+        await firstStarted.Task;
+        var second = tasks.RunAsync("第二个任务", async token => await Task.Delay(Timeout.InfiniteTimeSpan, token));
+        await Task.Delay(50);
+        Assert.True(tasks.IsBusy);
+
+        firstCleanup.SetResult();
+        tasks.CancelCommand.Execute(null);
+        await Task.WhenAll(first, second);
 
         Assert.False(tasks.IsBusy);
         Assert.Equal("操作已取消。", tasks.StatusMessage);
@@ -89,8 +132,8 @@ public sealed class WorkspaceViewModelTests
         Assert.Contains("未在项目中找到同名图片素材", vm.StatusHint);
     }
 
-    private sealed class TestDocument(string id, string title)
-        : PatchDocumentViewModel(id, title, true)
+    private sealed class TestDocument(string id, string title, bool canClose = true)
+        : PatchDocumentViewModel(id, title, canClose)
     {
         public void MarkDirty() => IsDirty = true;
     }

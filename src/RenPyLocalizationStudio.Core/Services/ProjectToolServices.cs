@@ -119,7 +119,10 @@ public sealed class PrefixRenameService(IFileSystemService fileSystem) : IPrefix
         var summary = new PrefixRenameSummary(renamed, skipped);
         return diagnostics.Count == 0
             ? OperationResult<PrefixRenameSummary>.Success(summary)
-            : new OperationResult<PrefixRenameSummary>(OperationStatus.SucceededWithWarnings, summary, diagnostics);
+            : new OperationResult<PrefixRenameSummary>(
+                diagnostics.Any(x => x.Severity == DiagnosticSeverity.Error) ? OperationStatus.Failed : OperationStatus.SucceededWithWarnings,
+                summary,
+                diagnostics);
     }
 
     private static bool IsInScope(ValidatedProjectPath path, PrefixRenamePlanRequest request)
@@ -284,7 +287,10 @@ public sealed class ImageCompressionService(IFileSystemService fileSystem) : IIm
         var summary = new ImageCompressionSummary(completed, skipped, saved);
         return diagnostics.Count == 0
             ? OperationResult<ImageCompressionSummary>.Success(summary)
-            : new OperationResult<ImageCompressionSummary>(OperationStatus.SucceededWithWarnings, summary, diagnostics);
+            : new OperationResult<ImageCompressionSummary>(
+                diagnostics.Any(x => x.Severity == DiagnosticSeverity.Error) ? OperationStatus.Failed : OperationStatus.SucceededWithWarnings,
+                summary,
+                diagnostics);
     }
 
     private static byte[]? Compress(byte[] content, string extension, int quality, out string reason)

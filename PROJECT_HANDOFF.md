@@ -14,17 +14,17 @@ RenPy Localization Studio 是一个面向 Windows 的 Ren’Py 人工汉化工�
 - 测试项目：`tests/RenPyLocalizationStudio.Tests`
 - 默认发布目录：`artifacts\win-x64`
 - 主程序：`artifacts\win-x64\RenPyLocalizationStudio.exe`
-- 当前版本：`0.3.5`
+- 当前版本：`0.3.9`
 - 发布方式：框架依赖，不是单文件或自包含包；目标机器需要 .NET 10 Desktop Runtime
 
 项目不接入机翻或模型 API，不执行游戏 EXE，不自动启动游戏，不修改原始源码来包裹 `_()`，不删除 `.rpa`、`.rpyc` 或 `.rpymc`。
 
 ## 2. 当前可用状态
 
-截至 2026-08-27：
+截至 2026-09-01：
 
 - Release 构建通过，0 警告、0 错误。
-- 自动化测试共 68 项，全部通过。
+- .NET 自动化测试共 113 项，另有 4 项 Python RPA 安全测试，全部通过。
 - 使用本机 `E:\renpy-8.5.2-sdk\renpy.exe` 对临时项目副本执行 lint，已通过。
 - 框架依赖发布由 `scripts/publish.ps1` 生成到被忽略的 `artifacts\win-x64`；本地清理后按需重新生成，正式包以 GitHub Release 为准。
 - 发布版已经完成启动烟测。
@@ -102,7 +102,7 @@ Core 不依赖 WPF、Dispatcher、ViewModel 或控件。
 - `RenPySourceParser`：容错解析 Ren’Py 源脚本。
 - `TlParser`：解析官方 translate 块与 strings 表。
 - `FlowProjectionService`：生成剧情路径、源文件和 Label 投影。
-- `ProjectWriter`：校验并安全回写译文与流程注释。
+- `IProjectSaveService` / `ProjectWriter`：规划并安全回写译文与流程注释，返回逐文件提交结果。
 - `TranslationValidator`：检查插值、百分号占位符和文本标签。
 - `Utf8TextFile`：严格 UTF-8、BOM、换行和末尾换行状态。
 
@@ -193,25 +193,30 @@ Task<OperationResult<T>> ExecuteAsync(
 
 Tab 崩溃的根因已经确认：`TextDocument.Insert` 会自动移动 Caret，旧逻辑又额外累加缩进长度，导致 CaretOffset 超过文档长度。现在使用插入前 offset 并将结果限制在 `TextLength` 内。
 
+2026-08-30 的架构审计修复还包括：
+
+- StoryPath 改为非递归控制流遍历；互斥条件、菜单汇合及 `call/return` 继续点具有明确边语义。
+- 保存返回逐文件成功/失败/取消结果，部分成功立即刷新对应文件基线；重复 dialogue ID 阻断保存。
+- strings 用户注释、额外文本空译文、Replace 多节点环与占位符、zzz 孤立受管标记均有回归覆盖。
+- Project Asset Index 使用图片查询字典及脚本场景状态二分定位；外部进程输出采用有界缓冲。
+- RPA/RPYC 在执行前展示逐项计划，并校验发布 manifest 中所有运行时文件的长度和 SHA-256。
+- `docs/adr/0001-project-snapshot-editing-model.md` 固定 Project Snapshot 的“结构稳定、编辑状态可变”语义。
+
 ## 8. 已知风险与未完全覆盖项
 
-1. **Git 基线缺失**：当前文件基本未跟踪。修改前先复制或建立首个明确提交，不要清理工作树。
-2. **补全交互测试不足**：自动化测试覆盖 Tab 不崩溃和缩进结果；补全弹窗已在真实发布窗口中显示并能按 `ju` 筛选 `jump`，但 WPF UI 自动化对弹出窗口焦点/Tab 接受的模拟不稳定。继续开发时应增加 STA 集成测试，直接验证候选接受后的文档文本。
-3. **发布脚本需要网络**：`scripts/prepare-tool-runtime.ps1` 每次发布会下载固定的 Python 3.13.7、unrpyc 2.0.4 和 rpatool，并刷新发布目录下受管工具文件。离线构建或供应链加固尚未完成。
-4. **工具校验**：发布脚本生成文件 SHA-256 清单，但下载前没有内置的固定上游哈希比对；若面向公开发布，应补充下载物哈希和许可证验收测试。
-5. **真实大项目性能**：虚拟化设计存在，但仍应继续用十万节点项目做容器数量、内存和滚动锚点的自动化性能验证。
-6. **RPYC 兼容范围**：固定 unrpyc 2.0.4，遇到未知 Ren’Py 节点或新格式必须返回诊断，不要尝试运行游戏脚本。
-7. **SDK 自动检测**：当前 UI 可显示未检测到 SDK；设置持久化和多版本选择仍需在不同机器上验证。
-8. **测试夹具含生成文件**：`tests/Fixtures/SdkProject` 当前含 cache、save、rpyc 和 lint 产生的日志。不要误把这些文件当生产项目数据；如清理，应先确认测试是否依赖它们。
+1. **补全交互测试不足**：自动化测试覆盖 Tab 不崩溃和缩进结果；WPF UI 自动化对补全弹窗焦点/Tab 接受的模拟仍不稳定，后续应增加专用 STA 交互测试。
+2. **首次完整发布需要网络**：Python、unrpyc 与 rpatool 下载物已在 `tools/tool-runtime.lock.json` 固定版本、URL 和 SHA-256；缓存命中后可复用，但全新环境仍需访问上游。
+3. **真实 UI 性能**：Core 已覆盖十万节点解析与非递归 StoryPath 投影，仍应继续测量 WPF 容器数量、图片内存和滚动锚点恢复。
+4. **RPYC 兼容范围**：固定 unrpyc 2.0.4，遇到未知 Ren’Py 节点或新格式必须返回诊断，不要尝试运行游戏脚本。
+5. **SDK 自动检测**：版本排序已按数值 `Version` 处理；多安装目录、权限受限机器和便携 SDK 仍需实机覆盖。
 
 ## 9. 推荐继续开发顺序
 
 1. 先为 AvalonEdit 自动补全增加真正的 STA 交互测试：输入 `ju` → 显示 `jump` → Tab 接受 → 文档变为 `jump target`。
 2. 给 TL 的预检、生成、取消和日志页增加 ViewModel 路由测试。
 3. 给 RPA/RPYC 单模式页面和计划结果增加测试，确认不会出现重复操作按钮。
-4. 给 Python/unrpyc/rpatool 下载添加固定 SHA-256、缓存复用和离线发布选项。
-5. 建立 Git 初始基线，再进行大范围重构。
-6. 用真实项目副本做端到端保存和外部修改冲突测试，禁止直接对唯一游戏目录试写。
+4. 为工具运行时缓存增加显式离线模式和许可证清单自动验收。
+5. 用真实项目副本做端到端部分保存、外部修改冲突和强制覆盖测试，禁止直接对唯一游戏目录试写。
 
 ## 10. 常用命令
 
@@ -266,7 +271,7 @@ Ren’Py 8.5.2 临时副本 lint：
 
 ```text
 扫描 E:\RenPyFlowTranslator，先完整阅读 PROJECT_HANDOFF.md、README.md、根目录约束和相关测试。
-检查 git status，注意当前没有可靠 Git 基线。
+检查 git status，保留用户尚未提交的工作树改动。
 先运行 dotnet test .\RenPyLocalizationStudio.sln -c Release 建立当前基准。
 任何 UI/保存/外部工具修改都必须检查真实实现并做对应回归，不要只改界面文字。
 ```

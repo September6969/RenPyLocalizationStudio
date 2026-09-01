@@ -54,6 +54,10 @@ public sealed record OperationResult<T>(
     public static OperationResult<T> Success(T value, IReadOnlyList<Diagnostic>? diagnostics = null)
     {
         diagnostics ??= [];
+        if (diagnostics.Any(x => x.Severity == DiagnosticSeverity.Error))
+        {
+            return new(OperationStatus.Failed, value, diagnostics);
+        }
         var status = diagnostics.Any(x => x.Severity == DiagnosticSeverity.Warning)
             ? OperationStatus.SucceededWithWarnings : OperationStatus.Succeeded;
         return new(status, value, diagnostics);

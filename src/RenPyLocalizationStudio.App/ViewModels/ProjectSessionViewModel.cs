@@ -78,6 +78,7 @@ public sealed class ProjectSessionViewModel : ObservableObject
     public IAsyncRelayCommand SaveWithAnnotationsCommand { get; }
     public IAsyncRelayCommand ForceSaveCommand { get; }
     public event EventHandler<ProjectSnapshot?>? SnapshotChanged;
+    public event EventHandler? SaveCompleted;
 
     /// <summary>控制译文停止输入后是否自动写入项目。</summary>
     public bool AutoSaveEnabled
@@ -101,6 +102,9 @@ public sealed class ProjectSessionViewModel : ObservableObject
         get => _projectPath;
         set
         {
+            value ??= string.Empty;
+            if (string.Equals(_projectPath, value, StringComparison.OrdinalIgnoreCase)) return;
+            if (!ConfirmScopeChange("切换项目", "切换项目将丢弃当前尚未保存的译文，仍要继续吗？")) return;
             if (!SetProperty(ref _projectPath, value)) return;
             Languages.Clear();
             if (_language.Length > 0)
@@ -122,6 +126,9 @@ public sealed class ProjectSessionViewModel : ObservableObject
         get => _language;
         set
         {
+            value ??= string.Empty;
+            if (string.Equals(_language, value, StringComparison.OrdinalIgnoreCase)) return;
+            if (!ConfirmScopeChange("切换语言", "切换目标语言将丢弃当前尚未保存的译文，仍要继续吗？")) return;
             if (!SetProperty(ref _language, value)) return;
             InvalidateSnapshot();
             OnPropertyChanged(nameof(CanAnalyze));
@@ -141,6 +148,7 @@ public sealed class ProjectSessionViewModel : ObservableObject
     }
 
     public bool CanAnalyze => !string.IsNullOrWhiteSpace(ProjectPath) && !string.IsNullOrWhiteSpace(Language) && !Tasks.IsBusy;
+    public bool HasUnsavedChanges => Snapshot?.TranslationUnits.Any(unit => unit.IsDirty) == true;
 
     public string SdkPath
     {
@@ -150,7 +158,12 @@ public sealed class ProjectSessionViewModel : ObservableObject
 
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
     {
-        var saved = await _settings.LoadAsync(cancellationToken);
+        var load = await _settings.LoadAsync(cancellationToken);
+        var saved = load.Value ?? new AppSettings(null, null, "#D16BA5");
+        foreach (var diagnostic in load.Diagnostics)
+            Tasks.Logs.Add(new ToolLogEntry(diagnostic.Message, diagnostic.Severity == DiagnosticSeverity.Error ? "Error" : "Warning"));
+        if (load.Status == OperationStatus.Failed)
+            Tasks.StatusMessage = load.Diagnostics.FirstOrDefault()?.Message ?? "设置读取失败，已使用默认设置。";
         _theme.TryApplyAccent(saved.AccentColor, out _);
         if (!string.IsNullOrWhiteSpace(saved.SdkPath)) _sdkPath = saved.SdkPath;
         AutoSaveEnabled = saved.AutoSaveEnabled;
@@ -159,7 +172,8 @@ public sealed class ProjectSessionViewModel : ObservableObject
         _lastTranslationGroupingMode = saved.LastTranslationGroupingMode;
         _lastTranslationProjectPath = saved.LastProject;
         _lastTranslationLanguage = saved.LastLanguage;
-        if (!string.IsNullOrWhiteSpace(saved.LastProject) && Directory.Exists(saved.LastProject))
+        // 项目路径验证统一交给目录发现服务；这里不直接访问磁盘，避免绕过文件系统 seam。
+        if (!string.IsNullOrWhiteSpace(saved.LastProject))
         {
             ProjectPath = saved.LastProject!;
             await LoadLanguagesAsync(saved.LastLanguage, cancellationToken);
@@ -256,32 +270,50 @@ public sealed class ProjectSessionViewModel : ObservableObject
     }
 
     /// <summary>窗口关闭前保存仍处于防抖等待中的最新译文。</summary>
-    public async Task FlushAutoSaveAsync(CancellationToken cancellationToken)
+    public async Task<bool> FlushAutoSaveAsync(CancellationToken cancellationToken)
     {
-        if (!AutoSaveEnabled || Snapshot is null || _taskCoordinator is null) return;
-        await _taskCoordinator.CancelAsync("translation-auto-save");
+        if (!HasUnsavedChanges) return true;
+        if (!AutoSaveEnabled || Snapshot is null || _taskCoordinator is null) return false;
+        await _taskCoordinator.CancelAsync("translation-auto-save", cancellationToken);
         var revision = Volatile.Read(ref _autoSaveRevision);
-        if (revision <= Volatile.Read(ref _persistedAutoSaveRevision)) return;
+        if (revision <= Volatile.Read(ref _persistedAutoSaveRevision)) return !HasUnsavedChanges;
         await AutoSaveAsync(revision, cancellationToken);
+        return !HasUnsavedChanges;
     }
 
-    public Task PersistSettingsAsync(CancellationToken cancellationToken = default)
+    public async Task<bool> PersistSettingsAsync(CancellationToken cancellationToken = default)
     {
         var positionIsCurrent = IsLastTranslationPositionInCurrentScope();
-        return _settings.SaveAsync(new AppSettings(
-            ProjectPath,
-            Language,
-            _theme.AccentColor,
-            _sdkPath,
-            AutoSaveEnabled,
-            positionIsCurrent ? _lastTranslationItemId : null,
-            positionIsCurrent ? _lastTranslationViewMode : null,
-            positionIsCurrent ? _lastTranslationGroupingMode : null), cancellationToken);
+        try
+        {
+            await _settings.SaveAsync(new AppSettings(
+                ProjectPath,
+                Language,
+                _theme.AccentColor,
+                _sdkPath,
+                AutoSaveEnabled,
+                positionIsCurrent ? _lastTranslationItemId : null,
+                positionIsCurrent ? _lastTranslationViewMode : null,
+                positionIsCurrent ? _lastTranslationGroupingMode : null), cancellationToken);
+            return true;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or
+                                           System.Security.SecurityException or ArgumentException or
+                                           NotSupportedException or InvalidOperationException)
+        {
+            Tasks.StatusMessage = $"设置保存失败：{exception.Message}";
+            Tasks.Logs.Add(new ToolLogEntry(Tasks.StatusMessage, "Error"));
+            return false;
+        }
     }
 
-    private async Task AutoSaveAsync(long revision, CancellationToken cancellationToken)
+    private async Task<bool> AutoSaveAsync(long revision, CancellationToken cancellationToken)
     {
-        if (!AutoSaveEnabled || Snapshot is null) return;
+        if (!AutoSaveEnabled || Snapshot is null) return !HasUnsavedChanges;
         while (Tasks.IsBusy)
             await Task.Delay(TimeSpan.FromMilliseconds(150), cancellationToken);
 
@@ -290,7 +322,7 @@ public sealed class ProjectSessionViewModel : ObservableObject
         if (warnings.Length > 0)
         {
             Tasks.StatusMessage = "自动保存已跳过：存在译文结构警告，请使用手动保存确认。";
-            return;
+            return false;
         }
 
         var saved = false;
@@ -301,6 +333,7 @@ public sealed class ProjectSessionViewModel : ObservableObject
         });
         if (saved && revision == Volatile.Read(ref _autoSaveRevision))
             MarkAutoSaveRevisionPersisted(revision);
+        return saved;
     }
 
     private async Task<bool> SaveCoreAsync(
@@ -343,6 +376,7 @@ public sealed class ProjectSessionViewModel : ObservableObject
         Tasks.StatusMessage = reloadAfterSave
             ? $"已{(forceOverwrite ? "强制覆盖" : "安全")}保存 {result.Value?.SavedFiles ?? 0} 个文件；正在重新加载。"
             : $"自动保存完成：{result.Value?.SavedFiles ?? 0} 个文件。";
+        SaveCompleted?.Invoke(this, EventArgs.Empty);
         if (reloadAfterSave) await AnalyzeCoreAsync(cancellationToken);
         return true;
     }
@@ -386,7 +420,8 @@ public sealed class ProjectSessionViewModel : ObservableObject
         }
         if (!result.IsSuccess || result.Value is null)
         {
-            _confirmation.ShowDiagnostics("分析失败", result.Diagnostics);
+            if (result.Status == OperationStatus.Cancelled) Tasks.StatusMessage = "项目分析已取消。";
+            else _confirmation.ShowDiagnostics("分析失败", result.Diagnostics);
             return;
         }
         Snapshot = result.Value;
@@ -418,6 +453,22 @@ public sealed class ProjectSessionViewModel : ObservableObject
         Interlocked.Exchange(ref _autoSaveRevision, 0);
         Interlocked.Exchange(ref _persistedAutoSaveRevision, 0);
         _taskCoordinator?.StartLatest("translation-auto-save", _ => Task.CompletedTask);
+    }
+
+    /// <summary>关闭时若自动保存无法完成，由用户明确决定是否放弃未保存译文。</summary>
+    public bool ConfirmDiscardUnsavedChanges(string action)
+    {
+        if (!HasUnsavedChanges) return true;
+        return _confirmation.Confirm(
+            "存在未保存译文",
+            $"{action}前仍有未保存译文。继续将放弃这些修改，是否继续？",
+            MessageBoxImage.Warning);
+    }
+
+    private bool ConfirmScopeChange(string title, string message)
+    {
+        if (!HasUnsavedChanges) return true;
+        return _confirmation.Confirm(title, message, MessageBoxImage.Warning);
     }
 
     private void NotifyCommandStates()

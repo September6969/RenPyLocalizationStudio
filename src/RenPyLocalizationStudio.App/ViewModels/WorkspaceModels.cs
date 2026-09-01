@@ -105,6 +105,7 @@ public sealed class ContentItem : ObservableObject
     private TranslationStatusKind _statusKind;
     private bool _isStatusVisible;
     private bool _isBookmarked;
+    private bool _missingNewPersisted;
 
     public required string Key { get; init; }
     public required string Title { get; init; }
@@ -239,6 +240,13 @@ public sealed class ContentItem : ObservableObject
 
     internal void SetBookmarked(bool value) => IsBookmarked = value;
 
+    /// <summary>保存成功后，解析时的 MissingNew 标志仍留在快照中；记录提交状态以消除过期提示。</summary>
+    internal void MarkPersisted()
+    {
+        if (Unit?.MissingNew == true && !Unit.IsDirty) _missingNewPersisted = true;
+        RefreshStatus();
+    }
+
     private ContentItem WithCurrentStatus()
     {
         RefreshStatus();
@@ -267,7 +275,7 @@ public sealed class ContentItem : ObservableObject
                 : (TranslationStatusKind.SharedImpact, $"影响 {SharedString.References.Count} 处", true);
         if (Unit is not null)
         {
-            if (Unit.MissingNew) return (TranslationStatusKind.Missing, "缺少 new", true);
+            if (Unit.MissingNew && !_missingNewPersisted) return (TranslationStatusKind.Missing, "缺少 new", true);
             if (Unit.IsUnboundFlowTranslation) return (TranslationStatusKind.Unbound, "未绑定", true);
             if (!IsTranslationComplete) return (TranslationStatusKind.Pending, "待翻译", true);
             return (TranslationStatusKind.Bound, string.Empty, false);

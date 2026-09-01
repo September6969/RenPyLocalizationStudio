@@ -5,7 +5,7 @@
              xmlns:behaviors="clr-namespace:RenPyLocalizationStudio.App.Behaviors">
     <Grid Margin="14,10"><Grid.RowDefinitions><RowDefinition Height="42"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
         <DockPanel><TextBlock Text="zzz.rpy 向导" FontWeight="SemiBold" VerticalAlignment="Center"/><Button Content="生成 Diff" Command="{Binding PreviewCommand}" Style="{StaticResource PrimaryButtonStyle}" HorizontalAlignment="Right"/></DockPanel>
-        <StackPanel Grid.Row="1" Margin="0,14,0,10"><CheckBox Content="默认语言" IsChecked="{Binding IncludeDefaultLanguage}"/><CheckBox Content="设置页语言入口" IsChecked="{Binding IncludePreferences}" Margin="0,8,0,0"/><TextBox Text="{Binding NativeLanguageName}" Margin="22,4,0,0" ToolTip="语言显示名称"/></StackPanel>
+        <StackPanel Grid.Row="1" Margin="0,14,0,10"><CheckBox Content="默认语言" IsChecked="{Binding IncludeDefaultLanguage}"/><CheckBox Content="生成语言选择 Screen（需在界面中 use）" IsChecked="{Binding IncludePreferences}" Margin="0,8,0,0" ToolTip="Ren’Py 无法从独立 zzz.rpy 安全注入任意项目的 preferences 布局；生成后请在合适的 screen 中 use rls_language_selector。"/><TextBox Text="{Binding NativeLanguageName}" Margin="22,4,0,0" ToolTip="语言显示名称"/></StackPanel>
         <StackPanel Grid.Row="2" Margin="0,0,0,10"><CheckBox Content="字体覆盖" IsChecked="{Binding IncludeFont}"/><TextBox Text="{Binding FontPath}" Margin="22,4,0,0" ToolTip="项目内字体路径"/></StackPanel>
         <Grid Grid.Row="3" Margin="0,8,0,6">
             <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>

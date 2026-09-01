@@ -76,4 +76,41 @@ translate schinese start_dialogue:
         Assert.Equal(23, units[0].SourceLine);
         Assert.Equal(26, units[1].SourceLine);
     }
+
+    [Fact]
+    public void Parse_字符串前的用户注释不会切断源码位置回溯()
+    {
+        const string tl = """
+translate schinese strings:
+    # game/script.rpy:42
+    # 用户自己补充的说明
+    # 另一行说明
+    old "Choice"
+    new "选择"
+""";
+
+        var unit = Assert.Single(new TlParser().Parse(TestFiles.InMemory(tl), "strings.rpy", "schinese").Units);
+
+        Assert.Equal("game/script.rpy", unit.SourcePath);
+        Assert.Equal(42, unit.SourceLine);
+    }
+
+    [Fact]
+    public void Parse_用户说明不会取代官方原语句且顶层代码结束翻译块()
+    {
+        const string tl = """
+# game/script.rpy:2
+translate schinese start_line:
+    # 译者说明：这里要保持语气
+    # e "Say \"hello\" to [name]."
+    e "向 [name] 问好。"
+
+define unrelated = "不属于翻译块"
+""";
+
+        var unit = Assert.Single(new TlParser().Parse(TestFiles.InMemory(tl), "script.rpy", "schinese").Units);
+
+        Assert.Equal("e \"Say \\\"hello\\\" to [name].\"", unit.OriginalStatement);
+        Assert.DoesNotContain("define unrelated", unit.RawBodyText);
+    }
 }

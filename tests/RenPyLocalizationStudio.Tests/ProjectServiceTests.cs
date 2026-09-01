@@ -57,6 +57,23 @@ public sealed class ProjectServiceTests
         Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == "PATH_TRAVERSAL");
     }
 
+    [Fact]
+    public async Task Analysis_允许直接把Game目录作为项目根()
+    {
+        var fileSystem = new InMemoryFileSystem("C:\\project\\game");
+        fileSystem.AddText("script.rpy", "label start:\n    \"Hello\"\n");
+        fileSystem.AddText("tl/schinese/script.rpy", "# game/script.rpy:2\ntranslate schinese start_a:\n    # \"Hello\"\n    \"你好\"\n");
+
+        var result = await new ProjectAnalysisService(fileSystem).ExecuteAsync(
+            new ProjectAnalysisRequest("C:\\project\\game", "schinese"),
+            new Progress<ToolOperationProgress>(), CancellationToken.None);
+
+        Assert.True(result.IsSuccess);
+        Assert.NotNull(result.Value);
+        Assert.Contains(result.Value.Graph.Labels.Keys, label => label == "start");
+        Assert.NotNull(Assert.Single(result.Value.TranslationUnits).BoundNode);
+    }
+
     private static InMemoryFileSystem CreateProject()
     {
         var fileSystem = new InMemoryFileSystem();

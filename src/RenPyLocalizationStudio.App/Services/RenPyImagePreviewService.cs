@@ -20,7 +20,9 @@ public sealed partial class RenPyImagePreviewService : IRenPyImagePreviewService
     private static readonly HashSet<string> ImageExtensions = new([".png", ".webp", ".jpg", ".jpeg", ".avif", ".bmp"], StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, ProjectAssetIndex> _indexes = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, SemaphoreSlim> _indexLocks = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, long> _indexVersions = new(StringComparer.OrdinalIgnoreCase);
     private int _indexBuildCount;
+    private int _disposed;
 
     internal int IndexBuildCount => Volatile.Read(ref _indexBuildCount);
 
@@ -32,6 +34,7 @@ public sealed partial class RenPyImagePreviewService : IRenPyImagePreviewService
 
     public async Task<RenPySceneContext> ResolveSceneContextAsync(RenPyImagePreviewRequest request, CancellationToken cancellationToken)
     {
+        ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
         if (string.IsNullOrWhiteSpace(request.ProjectPath) || string.IsNullOrWhiteSpace(request.RelativeScriptPath) || request.Line <= 0)
             return new RenPySceneContext(null, null, []);
 
@@ -54,32 +57,65 @@ public sealed partial class RenPyImagePreviewService : IRenPyImagePreviewService
 
     public void InvalidateProject(string projectPath)
     {
+        if (Volatile.Read(ref _disposed) != 0) return;
         var key = NormalizeFullPath(projectPath);
+        _indexVersions.AddOrUpdate(key, 1, static (_, version) => version + 1);
         if (_indexes.TryRemove(key, out var index)) index.Dispose();
+        // 活跃请求仍持有自己的 gate；从字典移除即可让项目切换后的新请求使用新 gate，
+        // 避免长期保留已离开的项目锁，同时不在并发等待期间误 Dispose。
+        _indexLocks.TryRemove(key, out _);
     }
 
     public void Dispose()
     {
+        if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
         foreach (var index in _indexes.Values) index.Dispose();
-        foreach (var gate in _indexLocks.Values) gate.Dispose();
         _indexes.Clear();
+        // 活跃构建可能仍会在 finally 中 Release gate；由 GC 回收 gate，禁止在这里提前 Dispose。
         _indexLocks.Clear();
+        _indexVersions.Clear();
     }
 
     private async Task<ProjectAssetIndex> GetIndexAsync(string projectPath, CancellationToken cancellationToken)
     {
+        ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
         var key = NormalizeFullPath(projectPath);
-        if (_indexes.TryGetValue(key, out var current) && !current.IsDirty) return current;
+        if (_indexes.TryGetValue(key, out var current) && !current.IsDirty)
+        {
+            ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
+            return current;
+        }
         var gate = _indexLocks.GetOrAdd(key, _ => new SemaphoreSlim(1, 1));
         await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            if (_indexes.TryGetValue(key, out current) && !current.IsDirty) return current;
-            current?.Dispose();
-            var rebuilt = await Task.Run(() => BuildIndex(key, cancellationToken), cancellationToken).ConfigureAwait(false);
-            Interlocked.Increment(ref _indexBuildCount);
-            _indexes[key] = rebuilt;
-            return rebuilt;
+            ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
+            while (true)
+            {
+                if (_indexes.TryGetValue(key, out current) && !current.IsDirty)
+                {
+                    ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
+                    return current;
+                }
+                var version = _indexVersions.GetOrAdd(key, 0);
+                current?.Dispose();
+                var rebuilt = await Task.Run(() => BuildIndex(key, cancellationToken), cancellationToken).ConfigureAwait(false);
+                if (Volatile.Read(ref _disposed) != 0)
+                {
+                    rebuilt.Dispose();
+                    throw new ObjectDisposedException(nameof(RenPyImagePreviewService));
+                }
+                if (version != _indexVersions.GetOrAdd(key, 0))
+                {
+                    // 构建期间项目被失效，不能把旧目录快照重新放回缓存。
+                    rebuilt.Dispose();
+                    cancellationToken.ThrowIfCancellationRequested();
+                    continue;
+                }
+                Interlocked.Increment(ref _indexBuildCount);
+                _indexes[key] = rebuilt;
+                return rebuilt;
+            }
         }
         finally { gate.Release(); }
     }
@@ -127,18 +163,9 @@ public sealed partial class RenPyImagePreviewService : IRenPyImagePreviewService
             if (explicitPath is not null && index.ImageSet.Contains(explicitPath)) return explicitPath;
         }
         var clean = tag.Trim();
-        var underscore = clean.Replace(' ', '_');
-        var space = clean.Replace('_', ' ');
-        var compact = Compact(clean);
-        foreach (var file in index.Images)
-        {
-            var name = Path.GetFileNameWithoutExtension(file);
-            if (name.Equals(clean, StringComparison.OrdinalIgnoreCase) || name.Equals(underscore, StringComparison.OrdinalIgnoreCase) ||
-                name.Equals(space, StringComparison.OrdinalIgnoreCase) || Compact(name) == compact) return file;
-        }
-        return index.Images.FirstOrDefault(file =>
-            Path.ChangeExtension(Path.GetRelativePath(projectPath, file), null)?.Replace('\\', '/').Replace('_', ' ')
-                .Contains(space, StringComparison.OrdinalIgnoreCase) == true);
+        foreach (var key in CandidateImageKeys(clean))
+            if (index.ImageLookup.TryGetValue(key, out var file)) return file;
+        return null;
     }
 
     private static string Compact(string value) => value.Replace(" ", "", StringComparison.Ordinal).Replace("_", "", StringComparison.Ordinal).ToLowerInvariant();
@@ -200,6 +227,15 @@ public sealed partial class RenPyImagePreviewService : IRenPyImagePreviewService
         {
             Images = images;
             ImageSet = images.ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var lookup = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var image in images)
+            {
+                var name = Path.GetFileNameWithoutExtension(image);
+                var relative = Path.ChangeExtension(Path.GetRelativePath(gamePath, image), null)?.Replace('\\', '/') ?? name;
+                foreach (var key in CandidateImageKeys(name).Concat(CandidateImageKeys(relative)))
+                    lookup.TryAdd(key, image);
+            }
+            ImageLookup = lookup;
             Scripts = scripts;
             Definitions = definitions;
             _watcher = new FileSystemWatcher(gamePath) { IncludeSubdirectories = true, NotifyFilter = NotifyFilters.FileName | NotifyFilters.DirectoryName | NotifyFilters.LastWrite | NotifyFilters.Size };
@@ -209,6 +245,7 @@ public sealed partial class RenPyImagePreviewService : IRenPyImagePreviewService
         }
         public IReadOnlyList<string> Images { get; }
         public HashSet<string> ImageSet { get; }
+        public IReadOnlyDictionary<string, string> ImageLookup { get; }
         public IReadOnlyDictionary<string, ScriptSceneIndex> Scripts { get; }
         public IReadOnlyDictionary<string, string> Definitions { get; }
         private int _isDirty;
@@ -224,7 +261,27 @@ public sealed partial class RenPyImagePreviewService : IRenPyImagePreviewService
     private sealed class ScriptSceneIndex
     {
         private readonly IReadOnlyList<SceneEvent> _events;
-        private ScriptSceneIndex(IReadOnlyList<SceneEvent> events) => _events = events;
+        private readonly IReadOnlyList<SceneState> _states;
+        private ScriptSceneIndex(IReadOnlyList<SceneEvent> events)
+        {
+            _events = events;
+            var states = new List<SceneState>(events.Count);
+            string? scene = null;
+            string? sceneTag = null;
+            var shows = new List<string>();
+            foreach (var item in events)
+            {
+                if (item.Command == "scene") { scene = item.Statement; sceneTag = item.Tag; shows.Clear(); }
+                else if (item.Tag is not null)
+                {
+                    var primary = item.Tag.Split(' ', '_')[0];
+                    shows.RemoveAll(tag => tag.Split(' ', '_')[0].Equals(primary, StringComparison.OrdinalIgnoreCase));
+                    if (item.Command == "show") shows.Add(item.Tag);
+                }
+                states.Add(new SceneState(scene, sceneTag, shows.ToArray()));
+            }
+            _states = states;
+        }
         public static ScriptSceneIndex Parse(IEnumerable<string> lines, IDictionary<string, string> definitions)
         {
             var events = new List<SceneEvent>();
@@ -243,18 +300,33 @@ public sealed partial class RenPyImagePreviewService : IRenPyImagePreviewService
         }
         public SceneState Resolve(int line)
         {
-            string? scene = null; string? sceneTag = null; var shows = new List<string>();
-            foreach (var item in _events.TakeWhile(item => item.Line <= line))
+            var low = 0;
+            var high = _events.Count - 1;
+            var found = -1;
+            while (low <= high)
             {
-                if (item.Command == "scene") { scene = item.Statement; sceneTag = item.Tag; shows.Clear(); }
-                else if (item.Tag is not null)
-                {
-                    var primary = item.Tag.Split(' ', '_')[0];
-                    shows.RemoveAll(tag => tag.Split(' ', '_')[0].Equals(primary, StringComparison.OrdinalIgnoreCase));
-                    if (item.Command == "show") shows.Add(item.Tag);
-                }
+                var middle = low + (high - low) / 2;
+                if (_events[middle].Line <= line) { found = middle; low = middle + 1; }
+                else high = middle - 1;
             }
-            return new SceneState(scene, sceneTag, shows);
+            return found < 0 ? new SceneState(null, null, []) : _states[found];
+        }
+    }
+
+    private static IEnumerable<string> CandidateImageKeys(string value)
+    {
+        var normalized = value.Trim().Replace('\\', '/');
+        yield return normalized;
+        yield return normalized.Replace(' ', '_');
+        yield return normalized.Replace('_', ' ');
+        yield return Compact(normalized);
+        var fileName = Path.GetFileName(normalized);
+        if (!fileName.Equals(normalized, StringComparison.OrdinalIgnoreCase))
+        {
+            yield return fileName;
+            yield return fileName.Replace(' ', '_');
+            yield return fileName.Replace('_', ' ');
+            yield return Compact(fileName);
         }
     }
 }

@@ -3,6 +3,7 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
     <Application.Resources>
         <ResourceDictionary>
+            <FontFamily x:Key="StudioTextFontFamily">pack://application:,,,/RenPyLocalizationStudio;component/Assets/Fonts/#LXGW WenKai</FontFamily>
             <ResourceDictionary.MergedDictionaries>
                 <ResourceDictionary Source="Themes/StudioTheme.xaml" />
                 <ResourceDictionary Source="Themes/WorkspaceTemplates.xaml" />

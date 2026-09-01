@@ -163,7 +163,8 @@ public sealed class TlWorkspaceViewModel : WorkspaceViewModelBase
             var installation = discovery.Value?.FirstOrDefault();
             if (installation is null)
             {
-                _confirmation.ShowDiagnostics("SDK 不可用", discovery.Diagnostics.Append(new Diagnostic(DiagnosticSeverity.Error, "SDK_NOT_FOUND", "未检测到 Ren’Py SDK。")));
+                if (discovery.Status == OperationStatus.Cancelled) _session.Tasks.StatusMessage = "SDK 检测已取消。";
+                else _confirmation.ShowDiagnostics("SDK 不可用", discovery.Diagnostics.Append(new Diagnostic(DiagnosticSeverity.Error, "SDK_NOT_FOUND", "未检测到 Ren’Py SDK。")));
                 return;
             }
             SdkSummary = $"{installation.DisplayVersion} · {installation.ExecutablePath}";
@@ -174,7 +175,8 @@ public sealed class TlWorkspaceViewModel : WorkspaceViewModelBase
             foreach (var line in result.Value?.Output.Split('\n', StringSplitOptions.RemoveEmptyEntries) ?? []) Main.Logs.Add(new ToolLogEntry(line.Trim()));
             if (!result.IsSuccess)
             {
-                _confirmation.ShowDiagnostics("SDK 操作失败", result.Diagnostics);
+                if (result.Status == OperationStatus.Cancelled) _session.Tasks.StatusMessage = "SDK 操作已取消。";
+                else _confirmation.ShowDiagnostics("SDK 操作失败", result.Diagnostics);
                 return;
             }
             _session.Tasks.StatusMessage = countOnly ? "TL 缺失数量预检完成。" : "TL 已生成，正在重新分析项目。";
@@ -272,6 +274,7 @@ public sealed class ExtraTextWorkspaceViewModel : WorkspaceViewModelBase
                 RebuildVisibleCandidates();
             }
         };
+        _session.PropertyChanged += OnSessionPropertyChanged;
     }
 
     public SimpleSidebarViewModel Sidebar { get; }
@@ -299,6 +302,16 @@ public sealed class ExtraTextWorkspaceViewModel : WorkspaceViewModelBase
     public string CandidateCountText => _allCandidates.Count > 0
         ? $"{VisibleCandidates.Count:N0} / {_allCandidates.Count:N0} 项"
         : "尚未扫描";
+
+    private void OnSessionPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs args)
+    {
+        if (args.PropertyName is not (nameof(ProjectSessionViewModel.ProjectPath) or nameof(ProjectSessionViewModel.Language))) return;
+        _allCandidates.Clear();
+        VisibleCandidates.Clear();
+        SelectedItem = null;
+        Badge = null;
+        OnPropertyChanged(nameof(CandidateCountText));
+    }
 
     public void RebuildVisibleCandidates()
     {
@@ -369,16 +382,56 @@ public sealed class ExtraTextWorkspaceViewModel : WorkspaceViewModelBase
         if (!_confirmation.Confirm("写入额外文本", $"将 {selected.Length} 条候选写入受管补丁，确认继续？")) return;
         var root = _fileSystem.ValidateProjectRoot(_session.ProjectPath);
         if (!root.IsSuccess || root.Value is null) { _confirmation.ShowDiagnostics("项目路径无效", root.Diagnostics); return; }
+        var projectPath = _session.ProjectPath;
+        var language = _session.Language;
         await _session.Tasks.RunAsync("正在写入额外文本补丁……", async token =>
         {
-            var relative = $"game/tl/{_session.Language}/rls_extra_strings.rpy";
-            var module = _patch.CreateExtraStringsModule(_session.Language, selected.Select(x => (x.Text, x.Translation)));
+            if (!string.Equals(projectPath, _session.ProjectPath, StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(language, _session.Language, StringComparison.OrdinalIgnoreCase)) return;
+            var relative = ProjectLayout.UnderGame(root.Value, "tl", language, "rls_extra_strings.rpy");
+            var entries = await LoadManagedExtraStringsAsync(root.Value, relative, language, token);
+            foreach (var item in selected) entries[item.Text] = item.Translation;
+            var module = _patch.CreateExtraStringsModule(language, entries.Select(x => (x.Key, x.Value)));
             var request = new ManagedPatchRequest(root.Value, relative, [module]);
             var result = await _patch.ExecuteAsync(new ManagedPatchWriteRequest(request, true), _session.Tasks.CreateProgress(), token);
-            if (!result.IsSuccess) _confirmation.ShowDiagnostics("额外文本写入失败", result.Diagnostics);
-            else if (await RefreshCandidatesAsync(root.Value, token, "写入成功，但刷新候选失败"))
+            if (result.Status == OperationStatus.Cancelled) _session.Tasks.StatusMessage = "额外文本写入已取消。";
+            else if (!result.IsSuccess) _confirmation.ShowDiagnostics("额外文本写入失败", result.Diagnostics);
+            else if (string.Equals(projectPath, _session.ProjectPath, StringComparison.OrdinalIgnoreCase) &&
+                     string.Equals(language, _session.Language, StringComparison.OrdinalIgnoreCase) &&
+                     await RefreshCandidatesAsync(root.Value, token, "写入成功，但刷新候选失败"))
                 _session.Tasks.StatusMessage = $"已写入 {selected.Length} 条额外文本，并刷新候选状态。";
         });
+    }
+
+    private async Task<Dictionary<string, string>> LoadManagedExtraStringsAsync(
+        ProjectRoot root,
+        string relativePath,
+        string language,
+        CancellationToken cancellationToken)
+    {
+        var entries = new Dictionary<string, string>(StringComparer.Ordinal);
+        var path = _fileSystem.ValidateProjectPath(root, relativePath);
+        if (!path.IsSuccess || path.Value is null) return entries;
+        var exists = await _fileSystem.ExistsAsync(path.Value, cancellationToken);
+        if (!exists.IsSuccess || !exists.Value) return entries;
+        var read = await _fileSystem.ReadUtf8Async(path.Value, cancellationToken);
+        if (!read.IsSuccess || read.Value is null) return entries;
+
+        const string beginMarker = "# RLS-ZZZ-BEGIN EXTRASTRINGS";
+        const string endMarker = "# RLS-ZZZ-END EXTRASTRINGS";
+        var begin = read.Value.Text.IndexOf(beginMarker, StringComparison.Ordinal);
+        var end = begin < 0 ? -1 : read.Value.Text.IndexOf(endMarker, begin + beginMarker.Length, StringComparison.Ordinal);
+        if (begin < 0 || end < 0) return entries;
+
+        var document = new TlParser().Parse(read.Value, relativePath, language);
+        foreach (var unit in document.Units.Where(unit => unit.Kind == TranslationUnitKind.String &&
+                                                          unit.OldText is not null &&
+                                                          unit.BlockSpan.Start >= begin &&
+                                                          unit.BlockSpan.End <= end))
+        {
+            entries[unit.OldText!] = unit.TranslationText;
+        }
+        return entries;
     }
 
     private async Task<bool> RefreshCandidatesAsync(ProjectRoot root, CancellationToken cancellationToken, string failureTitle)
@@ -389,7 +442,8 @@ public sealed class ExtraTextWorkspaceViewModel : WorkspaceViewModelBase
             cancellationToken);
         if (!result.IsSuccess || result.Value is null)
         {
-            _confirmation.ShowDiagnostics(failureTitle, result.Diagnostics);
+            if (result.Status == OperationStatus.Cancelled) _session.Tasks.StatusMessage = "额外文本扫描已取消。";
+            else _confirmation.ShowDiagnostics(failureTitle, result.Diagnostics);
             return false;
         }
 
@@ -550,73 +604,143 @@ public sealed class ArchiveWorkspaceViewModel : WorkspaceViewModelBase
 
     private async Task ExtractAsync()
     {
-        var runtime = ResolveRuntime();
         var root = _fileSystem.ValidateProjectRoot(_session.ProjectPath);
-        if (runtime is null || !root.IsSuccess || root.Value is null) { if (!root.IsSuccess) _confirmation.ShowDiagnostics("项目路径无效", root.Diagnostics); return; }
+        if (!root.IsSuccess || root.Value is null) { _confirmation.ShowDiagnostics("项目路径无效", root.Diagnostics); return; }
+        var projectPath = _session.ProjectPath;
+        var gameDirectory = ProjectLayout.GameDirectory(root.Value);
+        ToolRuntimePaths? runtime = null;
         string[] archives = [];
+        ArchiveExtractionPlan? extractionPlan = null;
         var planCompleted = false;
         await _session.Tasks.RunAsync("正在生成 RPA 解包计划……", async token =>
         {
-            var files = await _fileSystem.EnumerateFilesAsync(root.Value, "game", "*.rpa", token);
-            if (!files.IsSuccess || files.Value is null) { _confirmation.ShowDiagnostics("RPA 扫描失败", files.Diagnostics); return; }
+            var runtimeResult = await ToolRuntimeManifestValidator.ValidateAsync(AppContext.BaseDirectory, token);
+            if (!runtimeResult.IsSuccess || runtimeResult.Value is null)
+            {
+                if (runtimeResult.Status == OperationStatus.Cancelled) _session.Tasks.StatusMessage = "工具运行时校验已取消。";
+                else _confirmation.ShowDiagnostics("工具运行时不可用", runtimeResult.Diagnostics);
+                return;
+            }
+            runtime = runtimeResult.Value;
+            var files = await _fileSystem.EnumerateFilesAsync(root.Value, gameDirectory, "*.rpa", token);
+            if (!files.IsSuccess || files.Value is null)
+            {
+                if (files.Status == OperationStatus.Cancelled) _session.Tasks.StatusMessage = "RPA 扫描已取消。";
+                else _confirmation.ShowDiagnostics("RPA 扫描失败", files.Diagnostics);
+                return;
+            }
             archives = files.Value.Select(x => x.RelativePath).ToArray();
+            if (archives.Length == 0) { planCompleted = true; return; }
+            var plan = await _archive.PlanAsync(new ArchiveExtractionRequest(root.Value,
+                new ValidatedToolPath(runtime.Python), new ValidatedToolPath(runtime.RpaTool), archives, gameDirectory, false),
+                _session.Tasks.CreateProgress(), token);
+            if (!plan.IsSuccess || plan.Value is null)
+            {
+                if (plan.Status == OperationStatus.Cancelled) _session.Tasks.StatusMessage = "RPA 计划已取消。";
+                else _confirmation.ShowDiagnostics("RPA 计划失败", plan.Diagnostics);
+                return;
+            }
+            extractionPlan = plan.Value;
+            UnrenTool.PlanItems.Clear();
+            foreach (var item in extractionPlan.Items)
+                UnrenTool.PlanItems.Add(new UnrenPlanRow($"{item.ArchiveRelativePath} · {item.EntryPath}", item.OutputRelativePath,
+                    item.Message, item.Disposition == ToolPlanDisposition.Error));
+            UnrenTool.PlanSummary = $"写入 {extractionPlan.ReadyCount:N0} 项，跳过 {extractionPlan.SkippedCount:N0} 项。";
             planCompleted = true;
         });
         if (!planCompleted) return;
         if (archives.Length == 0) { _session.Tasks.StatusMessage = "项目中未找到 RPA。"; return; }
-        if (!_confirmation.Confirm("RPA 解包计划", $"将安全检查并解包 {archives.Length} 个 RPA；已有文件跳过，源 RPA 永不删除。确认继续？", MessageBoxImage.Warning))
+        if (runtime is null || extractionPlan is null || extractionPlan.ReadyCount == 0) { _session.Tasks.StatusMessage = "RPA 计划没有可写入项。"; return; }
+        if (!string.Equals(projectPath, _session.ProjectPath, StringComparison.OrdinalIgnoreCase))
+        {
+            _session.Tasks.StatusMessage = "项目已切换，RPA 计划已失效。";
+            return;
+        }
+        if (!_confirmation.Confirm("RPA 解包计划", $"计划写入 {extractionPlan.ReadyCount:N0} 项、跳过 {extractionPlan.SkippedCount:N0} 项；源 RPA 永不删除。确认继续？", MessageBoxImage.Warning))
         {
             _session.Tasks.StatusMessage = "已取消 RPA 解包。";
             return;
         }
         await _session.Tasks.RunAsync("正在安全解包 RPA……", async token =>
         {
-            var result = await _archive.ExecuteAsync(new ArchiveExtractionRequest(root.Value, new ValidatedToolPath(runtime.Value.Python), new ValidatedToolPath(runtime.Value.RpaTool), archives, "game", true), _session.Tasks.CreateProgress(), token);
-            if (!result.IsSuccess) _confirmation.ShowDiagnostics("RPA 解包未完全成功", result.Diagnostics);
+            var result = await _archive.ExecuteAsync(new ArchiveExtractionRequest(root.Value,
+                new ValidatedToolPath(runtime.Python), new ValidatedToolPath(runtime.RpaTool), archives,
+                gameDirectory, true, extractionPlan.Fingerprint), _session.Tasks.CreateProgress(), token);
+            if (result.Status == OperationStatus.Cancelled) _session.Tasks.StatusMessage = "RPA 解包已取消。";
+            else if (!result.IsSuccess) _confirmation.ShowDiagnostics("RPA 解包未完全成功", result.Diagnostics);
             else _session.Tasks.StatusMessage = $"已处理 {result.Value!.ProcessedArchives} 个 RPA；源文件全部保留。";
         });
     }
 
     private async Task DecompileAsync()
     {
-        var runtime = ResolveRuntime();
         var root = _fileSystem.ValidateProjectRoot(_session.ProjectPath);
-        if (runtime is null || !root.IsSuccess || root.Value is null) { if (!root.IsSuccess) _confirmation.ShowDiagnostics("项目路径无效", root.Diagnostics); return; }
+        if (!root.IsSuccess || root.Value is null) { _confirmation.ShowDiagnostics("项目路径无效", root.Diagnostics); return; }
+        var projectPath = _session.ProjectPath;
+        var gameDirectory = ProjectLayout.GameDirectory(root.Value);
+        ToolRuntimePaths? runtime = null;
         string[] scripts = [];
+        ScriptDecompilePlan? decompilePlan = null;
         var planCompleted = false;
         await _session.Tasks.RunAsync("正在生成脚本反编译计划……", async token =>
         {
-            var rpyc = await _fileSystem.EnumerateFilesAsync(root.Value, "game", "*.rpyc", token);
-            var rpymc = await _fileSystem.EnumerateFilesAsync(root.Value, "game", "*.rpymc", token);
+            var runtimeResult = await ToolRuntimeManifestValidator.ValidateAsync(AppContext.BaseDirectory, token);
+            if (!runtimeResult.IsSuccess || runtimeResult.Value is null)
+            {
+                if (runtimeResult.Status == OperationStatus.Cancelled) _session.Tasks.StatusMessage = "工具运行时校验已取消。";
+                else _confirmation.ShowDiagnostics("工具运行时不可用", runtimeResult.Diagnostics);
+                return;
+            }
+            runtime = runtimeResult.Value;
+            var rpyc = await _fileSystem.EnumerateFilesAsync(root.Value, gameDirectory, "*.rpyc", token);
+            var rpymc = await _fileSystem.EnumerateFilesAsync(root.Value, gameDirectory, "*.rpymc", token);
             if (!rpyc.IsSuccess || !rpymc.IsSuccess)
             {
-                _confirmation.ShowDiagnostics("脚本扫描失败", rpyc.Diagnostics.Concat(rpymc.Diagnostics));
+                if (rpyc.Status == OperationStatus.Cancelled || rpymc.Status == OperationStatus.Cancelled) _session.Tasks.StatusMessage = "脚本扫描已取消。";
+                else _confirmation.ShowDiagnostics("脚本扫描失败", rpyc.Diagnostics.Concat(rpymc.Diagnostics));
                 return;
             }
             scripts = (rpyc.Value ?? []).Concat(rpymc.Value ?? []).Select(x => x.RelativePath).ToArray();
+            if (scripts.Length == 0) { planCompleted = true; return; }
+            var plan = await _decompiler.PlanAsync(new ScriptDecompileRequest(root.Value,
+                new ValidatedToolPath(runtime.Python), new ValidatedToolPath(runtime.Unrpyc), scripts, false),
+                _session.Tasks.CreateProgress(), token);
+            if (!plan.IsSuccess || plan.Value is null)
+            {
+                if (plan.Status == OperationStatus.Cancelled) _session.Tasks.StatusMessage = "反编译计划已取消。";
+                else _confirmation.ShowDiagnostics("反编译计划失败", plan.Diagnostics);
+                return;
+            }
+            decompilePlan = plan.Value;
+            UnrenTool.PlanItems.Clear();
+            foreach (var item in decompilePlan.Items)
+                UnrenTool.PlanItems.Add(new UnrenPlanRow(item.SourceRelativePath, item.OutputRelativePath, item.Message,
+                    item.Disposition == ToolPlanDisposition.Error));
+            UnrenTool.PlanSummary = $"生成 {decompilePlan.ReadyCount:N0} 项，跳过 {decompilePlan.SkippedCount:N0} 项。";
             planCompleted = true;
         });
         if (!planCompleted) return;
         if (scripts.Length == 0) { _session.Tasks.StatusMessage = "项目中未找到 RPYC/RPYMC。"; return; }
-        if (!_confirmation.Confirm("RPYC 反编译计划", $"将反编译 {scripts.Length} 个脚本；已有 .rpy 跳过，编译文件永不删除。确认继续？", MessageBoxImage.Warning))
+        if (runtime is null || decompilePlan is null || decompilePlan.ReadyCount == 0) { _session.Tasks.StatusMessage = "反编译计划没有可执行项。"; return; }
+        if (!string.Equals(projectPath, _session.ProjectPath, StringComparison.OrdinalIgnoreCase))
+        {
+            _session.Tasks.StatusMessage = "项目已切换，反编译计划已失效。";
+            return;
+        }
+        if (!_confirmation.Confirm("RPYC 反编译计划", $"计划生成 {decompilePlan.ReadyCount:N0} 项、跳过 {decompilePlan.SkippedCount:N0} 项；编译文件永不删除。确认继续？", MessageBoxImage.Warning))
         {
             _session.Tasks.StatusMessage = "已取消脚本反编译。";
             return;
         }
         await _session.Tasks.RunAsync("正在反编译脚本……", async token =>
         {
-            var result = await _decompiler.ExecuteAsync(new ScriptDecompileRequest(root.Value, new ValidatedToolPath(runtime.Value.Python), new ValidatedToolPath(runtime.Value.Unrpyc), scripts, true), _session.Tasks.CreateProgress(), token);
-            if (!result.IsSuccess) _confirmation.ShowDiagnostics("反编译未完全成功", result.Diagnostics);
+            var result = await _decompiler.ExecuteAsync(new ScriptDecompileRequest(root.Value,
+                new ValidatedToolPath(runtime.Python), new ValidatedToolPath(runtime.Unrpyc), scripts,
+                true, decompilePlan.Fingerprint), _session.Tasks.CreateProgress(), token);
+            if (result.Status == OperationStatus.Cancelled) _session.Tasks.StatusMessage = "反编译已取消。";
+            else if (!result.IsSuccess) _confirmation.ShowDiagnostics("反编译未完全成功", result.Diagnostics);
             else _session.Tasks.StatusMessage = $"已处理 {result.Value!.ProcessedScripts} 个脚本；源文件全部保留。";
         });
     }
 
-    private (string Python, string RpaTool, string Unrpyc)? ResolveRuntime()
-    {
-        var tools = Path.Combine(AppContext.BaseDirectory, "tools");
-        var value = (Python: Path.Combine(tools, "python", "python.exe"), RpaTool: Path.Combine(tools, "rpatool", "rpatool.py"), Unrpyc: Path.Combine(tools, "unrpyc", "unrpyc.py"));
-        if (File.Exists(value.Python) && File.Exists(value.RpaTool) && File.Exists(value.Unrpyc)) return value;
-        _confirmation.ShowDiagnostics("工具运行时不可用", [new Diagnostic(DiagnosticSeverity.Error, "TOOL_RUNTIME_MISSING", "发布包缺少隔离工具运行时。请使用 scripts/publish.ps1 生成完整工具目录。", Category: DiagnosticCategory.Process)]);
-        return null;
-    }
 }

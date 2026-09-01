@@ -6,7 +6,7 @@
         WindowStyle="None" ResizeMode="CanResize" AllowsTransparency="False"
         Background="{DynamicResource BackgroundLevel0}" Foreground="{DynamicResource TextPrimaryBrush}"
         BorderThickness="1" BorderBrush="{DynamicResource BackgroundLevel1}"
-        FontFamily="Microsoft YaHei UI" TextOptions.TextFormattingMode="Display" UseLayoutRounding="True"
+        FontFamily="{StaticResource StudioTextFontFamily}" TextOptions.TextFormattingMode="Display" UseLayoutRounding="True"
         SizeChanged="OnWindowSizeChanged" StateChanged="OnWindowStateChanged"
         Closing="OnWindowClosing" Closed="OnWindowClosed"
         PreviewKeyDown="OnWindowPreviewKeyDown">

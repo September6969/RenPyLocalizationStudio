@@ -4,6 +4,7 @@ using System.Windows;
 using System.Windows.Media;
 using Microsoft.Win32;
 using RenPyLocalizationStudio.Core;
+using RenPyLocalizationStudio.Core.Services;
 
 namespace RenPyLocalizationStudio.App.Services;
 
@@ -467,22 +468,38 @@ public sealed class AppSettingsStore
         _legacySettingsPath = legacySettingsPath ?? settingsPath;
     }
 
-    public async Task<AppSettings> LoadAsync(CancellationToken cancellationToken)
+    public async Task<OperationResult<AppSettings>> LoadAsync(CancellationToken cancellationToken)
     {
+        var defaults = new AppSettings(null, null, "#D16BA5");
         try
         {
             var path = File.Exists(_settingsPath) ? _settingsPath : _legacySettingsPath;
-            if (!File.Exists(path)) return new(null, null, "#D16BA5");
+            if (!File.Exists(path)) return OperationResult<AppSettings>.Success(defaults);
             await using var stream = File.OpenRead(path);
-            return await JsonSerializer.DeserializeAsync<AppSettings>(stream, cancellationToken: cancellationToken) ?? new(null, null, "#D16BA5");
+            var settings = await JsonSerializer.DeserializeAsync<AppSettings>(stream, cancellationToken: cancellationToken);
+            if (settings is null)
+                return new OperationResult<AppSettings>(OperationStatus.Failed, defaults,
+                    [SettingsDiagnostic("SETTINGS_EMPTY", "设置文件内容为空，已使用默认设置。", path)]);
+            return OperationResult<AppSettings>.Success(settings);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             throw;
         }
-        catch
+        catch (JsonException exception)
         {
-            return new(null, null, "#D16BA5");
+            return new OperationResult<AppSettings>(OperationStatus.Failed, defaults,
+                [SettingsDiagnostic("SETTINGS_JSON_INVALID", "设置文件 JSON 已损坏，已使用默认设置。", _settingsPath, exception.Message)]);
+        }
+        catch (UnauthorizedAccessException exception)
+        {
+            return new OperationResult<AppSettings>(OperationStatus.Failed, defaults,
+                [SettingsDiagnostic("SETTINGS_ACCESS_DENIED", "没有权限读取设置文件，已使用默认设置。", _settingsPath, exception.Message)]);
+        }
+        catch (IOException exception)
+        {
+            return new OperationResult<AppSettings>(OperationStatus.Failed, defaults,
+                [SettingsDiagnostic("SETTINGS_READ_FAILED", "读取设置文件失败，已使用默认设置。", _settingsPath, exception.Message)]);
         }
     }
 
@@ -507,4 +524,7 @@ public sealed class AppSettingsStore
             _writeLock.Release();
         }
     }
+
+    private static Diagnostic SettingsDiagnostic(string code, string message, string path, string? details = null) =>
+        new(DiagnosticSeverity.Warning, code, message, path, Category: DiagnosticCategory.FileSystem, TechnicalDetails: details);
 }

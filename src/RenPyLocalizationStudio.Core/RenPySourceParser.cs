@@ -25,10 +25,10 @@ public sealed partial class RenPySourceParser
     [GeneratedRegex("^\\s*return(?:\\s+.+)?\\s*(?:#.*)?$")]
     private static partial Regex ReturnRegex();
 
-    [GeneratedRegex("^\\s*(?:(?<speaker>[A-Za-z_][A-Za-z0-9_\\.]*)\\s+)?(?<quote>[\"'])(?<text>(?:\\\\.|(?!\\k<quote>).)*)\\k<quote>(?:\\s+[^#]+)?\\s*(?:#.*)?$")]
+    [GeneratedRegex("^\\s*(?:(?<speaker>[A-Za-z_][A-Za-z0-9_\\.]*)(?<attributes>(?:\\s+[A-Za-z_][A-Za-z0-9_\\.]*)*)\\s+)?(?<quote>[\"'])(?<text>(?:\\\\.|(?!\\k<quote>).)*)\\k<quote>(?:\\s+[^#]+)?\\s*(?:#.*)?$")]
     private static partial Regex DialogueRegex();
 
-    [GeneratedRegex("^\\s*(?:python(?:\\s+(?:early|hide|in\\s+[A-Za-z_][A-Za-z0-9_.]*))*|init(?:\\s+-?\\d+)?(?:\\s+python(?:\\s+(?:early|hide|in\\s+[A-Za-z_][A-Za-z0-9_.]*))*)?|screen\\s+[^:]+)\\s*:\\s*(?:#.*)?$")]
+    [GeneratedRegex("^\\s*(?:python(?:\\s+(?:early|hide|in\\s+[A-Za-z_][A-Za-z0-9_.]*))*|init(?:\\s+-?\\d+)?(?:\\s+python(?:\\s+(?:early|hide|in\\s+[A-Za-z_][A-Za-z0-9_.]*))*)?|screen\\s+[^:]+|transform\\s+[^:]+|layeredimage\\s+[^:]+|image\\s+[^:=]+|style\\s+[^:]+|translate\\s+[^:]+)\\s*:\\s*(?:#.*)?$")]
     private static partial Regex OpaqueBlockRegex();
 
     [GeneratedRegex("(?:_|text|textbutton|tooltip)\\s*\\(?\\s*(?<quote>[\"'])(?<text>(?:\\\\.|(?!\\k<quote>).)*)\\k<quote>")]
@@ -46,6 +46,7 @@ public sealed partial class RenPySourceParser
         };
         var lines = TextUtilities.SliceLines(file.Text);
         var contexts = new Stack<ParseContext>();
+        var conditionalChains = new Dictionary<(string? ParentId, int Indent), string>();
         string? currentGlobalLabel = null;
 
         for (var index = 0; index < lines.Count; index++)
@@ -104,7 +105,16 @@ public sealed partial class RenPySourceParser
                 }
 
                 var node = CreateNode(document, FlowNodeKind.Label, line, indent, $"label {name}", labelName: name);
-                document.Graph.Labels[name] = node;
+                if (!document.Graph.Labels.TryAdd(name, node))
+                {
+                    document.Diagnostics.Add(new Diagnostic(
+                        DiagnosticSeverity.Error,
+                        "DUPLICATE_LABEL",
+                        $"label {name} 在同一文件中存在重复定义。",
+                        document.RelativePath,
+                        line.Number,
+                        DiagnosticCategory.Parsing));
+                }
                 contexts.Push(new ParseContext(indent, node.Id, ContextKind.Label));
                 continue;
             }
@@ -146,17 +156,33 @@ public sealed partial class RenPySourceParser
             {
                 var condition = conditionMatch.Groups["condition"].Value.Trim();
                 var type = conditionMatch.Groups["type"].Value;
-                var node = CreateNode(document, FlowNodeKind.Condition, line, indent, $"{type} {condition}", condition: condition, parentId: CurrentParent(contexts));
+                var parentId = CurrentParent(contexts);
+                var key = (parentId, indent);
+                var branchGroupId = type == "if" || !conditionalChains.TryGetValue(key, out var existingGroup)
+                    ? $"{document.RelativePath}:{line.Number}:condition-chain"
+                    : existingGroup;
+                conditionalChains[key] = branchGroupId;
+                var node = CreateNode(document, FlowNodeKind.Condition, line, indent, $"{type} {condition}", condition: condition,
+                    parentId: parentId, branchGroupId: branchGroupId);
                 contexts.Push(new ParseContext(indent, node.Id, ContextKind.Condition));
                 continue;
             }
 
             if (ElseRegex().IsMatch(line.Content))
             {
-                var node = CreateNode(document, FlowNodeKind.Condition, line, indent, "else", condition: "else", parentId: CurrentParent(contexts));
+                var parentId = CurrentParent(contexts);
+                var key = (parentId, indent);
+                var branchGroupId = conditionalChains.TryGetValue(key, out var existingGroup)
+                    ? existingGroup
+                    : $"{document.RelativePath}:{line.Number}:condition-chain";
+                conditionalChains[key] = branchGroupId;
+                var node = CreateNode(document, FlowNodeKind.Condition, line, indent, "else", condition: "else",
+                    parentId: parentId, branchGroupId: branchGroupId);
                 contexts.Push(new ParseContext(indent, node.Id, ContextKind.Condition));
                 continue;
             }
+
+            conditionalChains.Remove((CurrentParent(contexts), indent));
 
             var transferMatch = TransferRegex().Match(line.Content);
             if (transferMatch.Success)
@@ -204,7 +230,9 @@ public sealed partial class RenPySourceParser
             if (dialogueMatch.Success)
             {
                 var text = TextUtilities.UnescapeRenPyString(dialogueMatch.Groups["text"].Value);
-                var speaker = dialogueMatch.Groups["speaker"].Success ? dialogueMatch.Groups["speaker"].Value : null;
+                var speaker = dialogueMatch.Groups["speaker"].Success
+                    ? (dialogueMatch.Groups["speaker"].Value + dialogueMatch.Groups["attributes"].Value).Trim()
+                    : null;
                 CreateNode(
                     document,
                     FlowNodeKind.Dialogue,
@@ -235,6 +263,7 @@ public sealed partial class RenPySourceParser
         string? condition = null,
         string? originalText = null,
         string? parentId = null,
+        string? branchGroupId = null,
         bool isDynamic = false)
     {
         var node = new FlowNode
@@ -249,6 +278,7 @@ public sealed partial class RenPySourceParser
             Condition = condition,
             OriginalText = originalText,
             ParentId = parentId,
+            BranchGroupId = branchGroupId,
             Indent = indent,
             IsDynamic = isDynamic
         };
@@ -258,36 +288,129 @@ public sealed partial class RenPySourceParser
 
     private static void BuildEdges(FlowGraph graph)
     {
-        foreach (var group in graph.Nodes.GroupBy(node => node.ParentId))
+        var byId = graph.Nodes.ToDictionary(node => node.Id, StringComparer.Ordinal);
+        var children = graph.Nodes
+            .Where(node => node.ParentId is not null)
+            .GroupBy(node => node.ParentId!, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.OrderBy(node => node.Region.StartLine).ToArray(), StringComparer.Ordinal);
+        IReadOnlyList<FlowNode> BuildNode(FlowNode node)
         {
-            var children = group.OrderBy(node => node.Region.StartLine).ToList();
-            for (var index = 1; index < children.Count; index++)
+            if (node.Kind is FlowNodeKind.Jump or FlowNodeKind.Return or FlowNodeKind.Unresolved)
+                return [];
+            if (!children.TryGetValue(node.Id, out var nested) || nested.Length == 0)
+                return [node];
+
+            if (node.Kind == FlowNodeKind.Menu)
             {
-                var previous = children[index - 1];
-                var current = children[index];
-                if (previous.Kind is not (FlowNodeKind.Jump or FlowNodeKind.Return or FlowNodeKind.Unresolved) &&
-                    current.Kind != FlowNodeKind.Choice)
+                var exits = new List<FlowNode>();
+                var firstChoiceIndex = Array.FindIndex(nested, child => child.Kind == FlowNodeKind.Choice);
+                var captions = firstChoiceIndex > 0 ? nested[..firstChoiceIndex] : [];
+                var choiceSourceExits = new List<FlowNode> { node };
+                if (captions.Length > 0)
                 {
-                    graph.Edges.Add(new FlowEdge(previous.Id, current.Id, FlowEdgeKind.Sequence));
+                    ConnectSequence(node, captions);
+                    choiceSourceExits = GetSequenceExits(captions).ToList();
                 }
+
+                var choices = nested.Where(child => child.Kind == FlowNodeKind.Choice).ToArray();
+                foreach (var choice in choices)
+                {
+                    foreach (var source in choiceSourceExits)
+                        graph.Edges.Add(new FlowEdge(source.Id, choice.Id, FlowEdgeKind.Choice, choice.Condition));
+                    exits.AddRange(BuildNode(choice));
+                }
+                return choices.Length == 0 ? choiceSourceExits : exits;
+            }
+
+            ConnectSequence(node, nested);
+            return GetSequenceExits(nested);
+        }
+
+        void ConnectExit(FlowNode from, FlowNode to, FlowEdgeKind kind = FlowEdgeKind.Sequence, string? caption = null)
+        {
+            if (from.Kind == FlowNodeKind.Call)
+            {
+                graph.CallContinuations[from.Id] = to.Id;
+                return;
+            }
+            if (from.Kind is FlowNodeKind.Jump or FlowNodeKind.Return or FlowNodeKind.Unresolved) return;
+            graph.Edges.Add(new FlowEdge(from.Id, to.Id, kind, caption));
+        }
+
+        IReadOnlyList<FlowNode> GetSequenceExits(IReadOnlyList<FlowNode> sequence)
+        {
+            if (sequence.Count == 0) return [];
+            var last = sequence[^1];
+            if (last.Kind == FlowNodeKind.Condition && last.BranchGroupId is not null)
+            {
+                var branchGroup = sequence.Where(node => node.BranchGroupId == last.BranchGroupId).ToArray();
+                var exits = branchGroup.SelectMany(BuildNode).ToList();
+                if (!branchGroup.Any(node => node.Condition == "else")) exits.Add(branchGroup[^1]);
+                return exits;
+            }
+            return BuildNode(last);
+        }
+
+        void ConnectSequence(FlowNode parent, IReadOnlyList<FlowNode> sequence)
+        {
+            var previousExits = new List<FlowNode> { parent };
+            for (var index = 0; index < sequence.Count;)
+            {
+                var current = sequence[index];
+                if (current.Kind == FlowNodeKind.Condition && current.BranchGroupId is not null)
+                {
+                    var branchGroup = sequence.Skip(index)
+                        .TakeWhile(node => node.Kind == FlowNodeKind.Condition && node.BranchGroupId == current.BranchGroupId)
+                        .ToArray();
+                    foreach (var branch in branchGroup)
+                    {
+                        foreach (var previous in previousExits)
+                            ConnectExit(previous, branch, FlowEdgeKind.Condition, branch.Condition);
+                    }
+                    previousExits = branchGroup.SelectMany(BuildNode).ToList();
+                    if (!branchGroup.Any(node => node.Condition == "else")) previousExits.Add(branchGroup[^1]);
+                    index += branchGroup.Length;
+                    continue;
+                }
+
+                foreach (var previous in previousExits) ConnectExit(previous, current);
+                previousExits = BuildNode(current).ToList();
+                index++;
             }
         }
 
-        foreach (var node in graph.Nodes.Where(node => node.ParentId is not null))
+        var labelExits = new Dictionary<string, IReadOnlyList<FlowNode>>(StringComparer.Ordinal);
+        foreach (var label in graph.Nodes.Where(node => node.Kind == FlowNodeKind.Label))
         {
-            var parent = graph.Nodes.FirstOrDefault(candidate => candidate.Id == node.ParentId);
-            if (parent is null)
+            if (children.TryGetValue(label.Id, out var labelChildren))
             {
-                continue;
+                ConnectSequence(label, labelChildren);
+                labelExits[label.Id] = GetSequenceExits(labelChildren);
             }
-
-            var edgeKind = node.Kind switch
+            else
             {
-                FlowNodeKind.Choice => FlowEdgeKind.Choice,
-                FlowNodeKind.Condition => FlowEdgeKind.Condition,
-                _ => FlowEdgeKind.Contains
-            };
-            graph.Edges.Add(new FlowEdge(parent.Id, node.Id, edgeKind, node.Condition));
+                labelExits[label.Id] = [label];
+            }
+        }
+
+        // 同一文件内按物理顺序自然落入下一个 label；文件末尾统一落到 EndOfFile。
+        foreach (var fileGroup in graph.Nodes.GroupBy(node => node.Region.RelativePath, StringComparer.OrdinalIgnoreCase))
+        {
+            var labels = fileGroup.Where(node => node.Kind == FlowNodeKind.Label).OrderBy(node => node.Region.StartLine).ToArray();
+            var end = fileGroup.Single(node => node.Kind == FlowNodeKind.EndOfFile);
+            for (var index = 0; index < labels.Length; index++)
+            {
+                var continuation = index + 1 < labels.Length ? labels[index + 1] : end;
+                foreach (var exit in labelExits[labels[index].Id]) ConnectExit(exit, continuation,
+                    continuation.Kind == FlowNodeKind.EndOfFile ? FlowEdgeKind.End : FlowEdgeKind.Sequence);
+            }
+        }
+
+        foreach (var rootGroup in graph.Nodes.Where(node => node.ParentId is null && node.Kind != FlowNodeKind.Label)
+                     .GroupBy(node => node.Region.RelativePath, StringComparer.OrdinalIgnoreCase))
+        {
+            var roots = rootGroup.OrderBy(node => node.Region.StartLine).ToArray();
+            for (var index = 1; index < roots.Length; index++) ConnectExit(roots[index - 1], roots[index]);
         }
 
         foreach (var node in graph.Nodes.Where(node => node.Kind is FlowNodeKind.Jump or FlowNodeKind.Call))
@@ -299,6 +422,24 @@ public sealed partial class RenPySourceParser
 
             graph.Edges.Add(new FlowEdge(node.Id, target.Id, node.Kind == FlowNodeKind.Jump ? FlowEdgeKind.Jump : FlowEdgeKind.Call));
         }
+
+        foreach (var (callId, continuationId) in graph.CallContinuations)
+        {
+            if (!byId.TryGetValue(callId, out var call) || call.Target is null || !graph.Labels.TryGetValue(call.Target, out var targetLabel)) continue;
+            foreach (var returnNode in graph.Nodes.Where(node => node.Kind == FlowNodeKind.Return && IsDescendantOf(node, targetLabel.Id, byId)))
+                graph.Edges.Add(new FlowEdge(returnNode.Id, continuationId, FlowEdgeKind.Return, $"return → {continuationId}"));
+        }
+    }
+
+    private static bool IsDescendantOf(FlowNode node, string ancestorId, IReadOnlyDictionary<string, FlowNode> byId)
+    {
+        var parentId = node.ParentId;
+        while (parentId is not null && byId.TryGetValue(parentId, out var parent))
+        {
+            if (parent.Id == ancestorId) return true;
+            parentId = parent.ParentId;
+        }
+        return false;
     }
 
     private static int FindOpaqueBlockEnd(IReadOnlyList<LineSlice> lines, int headerIndex, int headerIndent)

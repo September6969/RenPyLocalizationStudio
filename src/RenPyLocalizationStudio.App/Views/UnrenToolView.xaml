@@ -11,12 +11,25 @@
             <Button Content="{Binding ActionLabel}" Command="{Binding ActionCommand}" Style="{StaticResource PrimaryButtonStyle}" HorizontalAlignment="Right"/>
         </DockPanel>
         <TextBlock Grid.Row="1" Margin="0,20,0,12" Text="输出冲突会逐项诊断；源 .rpa、.rpyc 和 .rpymc 永不删除。" Foreground="{DynamicResource TextMutedBrush}"/>
-        <Border Grid.Row="2" Background="{DynamicResource BackgroundLevel1}" Padding="14">
-            <StackPanel>
-                <TextBlock Text="安全边界" FontWeight="SemiBold"/>
-                <TextBlock Margin="0,8,0,0" Foreground="{DynamicResource TextMutedBrush}" TextWrapping="Wrap"
-                           Text="{Binding SafetyDescription}"/>
-            </StackPanel>
-        </Border>
+        <Grid Grid.Row="2" Background="{DynamicResource BackgroundLevel1}">
+            <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+            <TextBlock Margin="14,12,14,0" Text="{Binding PlanSummary}" FontWeight="SemiBold"/>
+            <TextBlock Grid.Row="1" Margin="14,7,14,10" Foreground="{DynamicResource TextMutedBrush}" TextWrapping="Wrap"
+                       Text="{Binding SafetyDescription}"/>
+            <ListBox Grid.Row="2" Margin="8,0,8,8" ItemsSource="{Binding PlanItems}"
+                     VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling"
+                     ScrollViewer.CanContentScroll="True">
+                <ListBox.ItemTemplate>
+                    <DataTemplate>
+                        <Grid Margin="6,4">
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="2*"/><ColumnDefinition Width="2*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                            <TextBlock Text="{Binding Source}" TextTrimming="CharacterEllipsis"/>
+                            <TextBlock Grid.Column="1" Margin="12,0" Text="{Binding Output}" Foreground="{DynamicResource PathTextBrush}" TextTrimming="CharacterEllipsis"/>
+                            <TextBlock Grid.Column="2" Text="{Binding Status}" Foreground="{DynamicResource TextMutedBrush}" TextTrimming="CharacterEllipsis"/>
+                        </Grid>
+                    </DataTemplate>
+                </ListBox.ItemTemplate>
+            </ListBox>
+        </Grid>
     </Grid>
 </UserControl>

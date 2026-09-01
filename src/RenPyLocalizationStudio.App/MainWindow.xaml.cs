@@ -211,19 +211,25 @@ public partial class MainWindow : Window
         if (_shutdownInProgress) return;
 
         _shutdownInProgress = true;
+        var canClose = false;
         try
         {
             using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            await _viewModel.ShutdownAsync(cancellation.Token);
+            canClose = await _viewModel.ShutdownAsync(cancellation.Token);
         }
         catch (Exception exception)
         {
             _viewModel.Tasks.Logs.Add(new ToolLogEntry($"关闭前保存失败：{exception.Message}", "Warning"));
+            _viewModel.Tasks.StatusMessage = "关闭已中止：后台任务或保存尚未安全结束。";
         }
         finally
         {
-            _shutdownComplete = true;
             _shutdownInProgress = false;
+        }
+
+        if (canClose)
+        {
+            _shutdownComplete = true;
             Close();
         }
     }

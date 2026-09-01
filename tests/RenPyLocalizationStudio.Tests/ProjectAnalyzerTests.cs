@@ -123,4 +123,41 @@ translate schinese style endscene_stats is text:
         Assert.DoesNotContain(snapshot.TranslationUnits, unit => unit.IsUnboundFlowTranslation);
         Assert.DoesNotContain(snapshot.Diagnostics, diagnostic => diagnostic.Code == "UNBOUND_TRANSLATION");
     }
+
+    [Fact]
+    public async Task Analyze_重复DialogueId生成阻断诊断()
+    {
+        const string source = "label start:\n    \"A\"\n    \"B\"\n";
+        const string tl = "# game/script.rpy:2\ntranslate schinese duplicate_id:\n    \"甲\"\n";
+        await using var project = await TestFiles.CreateProjectAsync(source, tl);
+        await File.WriteAllTextAsync(Path.Combine(project.Root, "game", "tl", "schinese", "second.rpy"),
+            "# game/script.rpy:3\ntranslate schinese duplicate_id:\n    \"乙\"\n");
+
+        var snapshot = await TestFiles.AnalyzeAsync(project.Root);
+
+        Assert.Equal(2, snapshot.Diagnostics.Count(diagnostic => diagnostic.Code == "DUPLICATE_DIALOGUE_ID"));
+        Assert.Contains(new ProjectWriter(new RenPyLocalizationStudio.Core.Services.FileSystemService()).Validate(snapshot),
+            diagnostic => diagnostic.Code == "DUPLICATE_DIALOGUE_ID");
+    }
+
+    [Fact]
+    public async Task Analyze_跨文件Call的Return连接调用继续点()
+    {
+        const string source = """
+label start:
+    call sub
+    "Continue"
+""";
+        const string tl = "translate schinese strings:\n";
+        await using var project = await TestFiles.CreateProjectAsync(source, tl);
+        await File.WriteAllTextAsync(Path.Combine(project.Root, "game", "sub.rpy"),
+            "label sub:\n    \"Sub\"\n    return\n");
+
+        var snapshot = await TestFiles.AnalyzeAsync(project.Root);
+        var returnNode = Assert.Single(snapshot.Graph.Nodes, node => node.Kind == FlowNodeKind.Return);
+        var continuation = Assert.Single(snapshot.Graph.Nodes, node => node.OriginalText == "Continue");
+
+        Assert.Contains(snapshot.Graph.Edges, edge =>
+            edge.FromId == returnNode.Id && edge.ToId == continuation.Id && edge.Kind == FlowEdgeKind.Return);
+    }
 }

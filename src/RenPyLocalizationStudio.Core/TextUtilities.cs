@@ -94,6 +94,43 @@ internal static partial class TextUtilities
 
         return builder.ToString();
     }
+
+    /// <summary>
+    /// 提取语句中最后一个完整的 Ren'Py 引号字符串。转义引号不会被误认为边界。
+    /// </summary>
+    public static string? ExtractLastQuotedString(string statement)
+    {
+        string? lastValue = null;
+        for (var index = 0; index < statement.Length; index++)
+        {
+            var quote = statement[index];
+            if (quote is not ('\'' or '"')) continue;
+
+            var builder = new StringBuilder();
+            var closed = false;
+            for (index++; index < statement.Length; index++)
+            {
+                var character = statement[index];
+                if (character == '\\' && index + 1 < statement.Length)
+                {
+                    builder.Append(character).Append(statement[++index]);
+                    continue;
+                }
+
+                if (character == quote)
+                {
+                    closed = true;
+                    break;
+                }
+
+                builder.Append(character);
+            }
+
+            if (closed) lastValue = UnescapeRenPyString(builder.ToString());
+        }
+
+        return lastValue;
+    }
 }
 
 internal sealed record LineSlice(int Number, int Start, int Length, string Content)

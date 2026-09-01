@@ -10,7 +10,7 @@ on:
 jobs:
   windows:
     runs-on: windows-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-dotnet@v5
@@ -20,13 +20,66 @@ jobs:
         run: dotnet restore RenPyLocalizationStudio.sln
       - name: Verify formatting
         run: dotnet format RenPyLocalizationStudio.sln --verify-no-changes --no-restore
+      - name: Verify safe extraction wrapper syntax
+        shell: pwsh
+        run: python -c "compile(open('tools/safe_rpa_extract.py', encoding='utf-8').read(), 'safe_rpa_extract.py', 'exec')"
+      - name: Test safe RPA reader
+        run: python -m unittest tests.tooling.test_safe_rpa_extract -v
       - name: Build Release
         run: dotnet build RenPyLocalizationStudio.sln -c Release --no-restore
       - name: Test
         run: dotnet test RenPyLocalizationStudio.sln -c Release --no-build
-      - name: Framework-dependent publish smoke
-        run: dotnet publish src/RenPyLocalizationStudio.App/RenPyLocalizationStudio.App.csproj -c Release -r win-x64 --self-contained false --no-build -o artifacts/ci-publish
+      - name: Cache Ren'Py SDK and tool downloads
+        uses: actions/cache@v4
+        with:
+          path: |
+            .ci/renpy-8.5.2-sdk
+            .ci/tool-downloads
+          key: rls-tools-${{ runner.os }}-renpy-8.5.2-${{ hashFiles('tools/tool-runtime.lock.json') }}
+      - name: Prepare Ren'Py 8.5.2 SDK
+        shell: pwsh
+        run: |
+          $sdk = Join-Path $PWD '.ci/renpy-8.5.2-sdk/renpy.exe'
+          if (-not (Test-Path -LiteralPath $sdk)) {
+            $archive = Join-Path $env:RUNNER_TEMP 'renpy-8.5.2-sdk.zip'
+            Invoke-WebRequest 'https://www.renpy.org/dl/8.5.2/renpy-8.5.2-sdk.zip' -OutFile $archive
+            $expected = 'f85ac72c353cd14056ae0a9e25d8a2bd27232c0de4b59e29ead9114bd68b1fa4'
+            $actual = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($actual -ne $expected) { throw "Ren'Py SDK 哈希不匹配：$actual" }
+            $extract = Join-Path $env:RUNNER_TEMP 'renpy-sdk'
+            Expand-Archive -LiteralPath $archive -DestinationPath $extract -Force
+            New-Item -ItemType Directory -Path (Split-Path -Parent $sdk) -Force | Out-Null
+            Get-ChildItem -LiteralPath (Join-Path $extract 'renpy-8.5.2-sdk') | Copy-Item -Destination (Split-Path -Parent $sdk) -Recurse -Force
+          }
+      - name: Ren'Py SDK lint fixture
+        shell: pwsh
+        run: ./scripts/verify-sdk-lint.ps1 -SdkExe ./.ci/renpy-8.5.2-sdk/renpy.exe
+      - name: Build complete framework-dependent package
+        shell: pwsh
+        env:
+          RLS_TOOL_CACHE: ${{ github.workspace }}\.ci\tool-downloads
+        run: ./scripts/publish.ps1 -Package
+      - name: Verify tool runtime manifest
+        shell: pwsh
+        run: ./scripts/verify-tool-manifest.ps1
+      - name: Verify reproducible package
+        shell: pwsh
+        env:
+          RLS_TOOL_CACHE: ${{ github.workspace }}\.ci\tool-downloads
+        run: |
+          $archive = Get-ChildItem artifacts/release/*.zip | Select-Object -First 1
+          $first = (Get-FileHash -LiteralPath $archive.FullName -Algorithm SHA256).Hash
+          ./scripts/publish.ps1 -Package
+          $second = (Get-FileHash -LiteralPath $archive.FullName -Algorithm SHA256).Hash
+          if ($first -ne $second) { throw "重复构建 ZIP 哈希不一致：$first / $second" }
       - name: Reject debug symbols
         shell: pwsh
         run: |
-          if (Get-ChildItem artifacts/ci-publish -Filter *.pdb -Recurse) { throw '发布目录包含 PDB。' }
+          if (Get-ChildItem artifacts/win-x64 -Filter *.pdb -Recurse) { throw '发布目录包含 PDB。' }
+      - name: Upload package
+        uses: actions/upload-artifact@v4
+        with:
+          name: RenPyLocalizationStudio-framework-dependent
+          path: |
+            artifacts/release/*.zip
+            artifacts/release/*.sha256

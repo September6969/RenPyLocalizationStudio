@@ -53,9 +53,8 @@ try {
     Copy-Item -LiteralPath $lockPath -Destination (Join-Path $output 'tool-runtime.lock.json') -Force
     $manifest = [ordered]@{
         schemaVersion = 1
-        generatedAtUtc = [DateTime]::UtcNow.ToString('O')
         components = $lock.components
-        files = @(Get-ChildItem -LiteralPath $output -File -Recurse | ForEach-Object {
+        files = @(Get-ChildItem -LiteralPath $output -File -Recurse | Sort-Object FullName | ForEach-Object {
             [ordered]@{ path = $_.FullName.Substring($output.Length).TrimStart('\', '/'); length = $_.Length; sha256 = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash }
         })
     }

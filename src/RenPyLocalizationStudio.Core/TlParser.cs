@@ -25,7 +25,9 @@ public sealed partial class TlParser
         {
             File = file,
             Language = expectedLanguage,
-            RelativePath = TextUtilities.NormalizePath(relativePath)
+            RelativePath = TextUtilities.NormalizePath(relativePath),
+            BaselineText = file.Text,
+            BaselineSha256 = file.Sha256
         };
         var lines = TextUtilities.SliceLines(file.Text);
 
@@ -93,7 +95,8 @@ public sealed partial class TlParser
             }
 
             var statement = SourceStatementRegex().Match(line.Content);
-            if (statement.Success && sourceStatement is null && activeLineCount == 0)
+            if (statement.Success && activeLineCount == 0 &&
+                IsOfficialSourceStatement(statement.Groups["statement"].Value))
             {
                 sourceStatement = statement.Groups["statement"].Value.Trim();
                 continue;
@@ -203,8 +206,12 @@ public sealed partial class TlParser
                 {
                     sourcePath = TextUtilities.NormalizePath(location.Groups["path"].Value);
                     sourceLine = int.Parse(location.Groups["line"].Value);
+                    break;
                 }
 
+                // 用户可能在官方源码位置注释与 old 之间插入任意普通注释。
+                // 注释不应切断位置回溯；遇到真实语句或上一条 old/new 才停止。
+                if (lines[commentIndex].Content.TrimStart().StartsWith('#')) continue;
                 break;
             }
 
@@ -297,6 +304,17 @@ public sealed partial class TlParser
             {
                 return index;
             }
+
+            if (TextUtilities.GetIndent(lines[index].Content) == 0 && SourceLocationRegex().IsMatch(lines[index].Content))
+            {
+                return index;
+            }
+
+            var trimmed = lines[index].Content.Trim();
+            if (trimmed.Length > 0 && !trimmed.StartsWith('#') && TextUtilities.GetIndent(lines[index].Content) == 0)
+            {
+                return index;
+            }
         }
 
         return lines.Count;
@@ -312,5 +330,11 @@ public sealed partial class TlParser
 
         var firstWord = prefix.Split([' ', '\t'], StringSplitOptions.RemoveEmptyEntries).FirstOrDefault();
         return firstWord is not ("show" or "scene" or "hide" or "play" or "queue" or "voice" or "python" or "if" or "elif" or "else" or "jump" or "call" or "pause" or "window");
+    }
+
+    private static bool IsOfficialSourceStatement(string statement)
+    {
+        var quoted = QuotedValueRegex().Matches(statement).Cast<Match>().LastOrDefault();
+        return quoted is not null && IsEditableDialogueStatement(statement, quoted);
     }
 }
