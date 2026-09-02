@@ -14,7 +14,7 @@ $cache = [System.IO.Path]::GetFullPath($CacheDirectory)
 $workspace = Join-Path ([System.IO.Path]::GetTempPath()) ('RLS-Tools-' + [Guid]::NewGuid().ToString('N'))
 $pythonDir = Join-Path $output 'python'
 $unrpycDir = Join-Path $output 'unrpyc'
-$rpaDir = Join-Path $output 'rpatool'
+$rpaDir = Join-Path $output 'rpa'
 
 function Get-LockedDownload([object]$component) {
     $target = Join-Path $cache $component.fileName
@@ -34,8 +34,7 @@ try {
     New-Item -ItemType Directory -Path $workspace,$output,$cache -Force | Out-Null
     $pythonZip = Get-LockedDownload $lock.components.python
     $unrpycZip = Get-LockedDownload $lock.components.unrpyc
-    $rpatoolFile = Get-LockedDownload $lock.components.rpatool
-    foreach ($managedPath in @($pythonDir, $unrpycDir, $rpaDir, (Join-Path $output 'manifest.json'))) {
+    foreach ($managedPath in @($pythonDir, $unrpycDir, $rpaDir, (Join-Path $output 'rpatool'), (Join-Path $output 'manifest.json'))) {
         if (Test-Path -LiteralPath $managedPath) { Remove-Item -LiteralPath $managedPath -Recurse -Force }
     }
     New-Item -ItemType Directory -Path $pythonDir,$unrpycDir,$rpaDir -Force | Out-Null
@@ -47,8 +46,7 @@ try {
     Copy-Item -LiteralPath (Join-Path $unrpycSource 'decompiler') -Destination $unrpycDir -Recurse -Force
     Copy-Item -LiteralPath (Join-Path $unrpycSource 'LICENSE') -Destination $unrpycDir -Force
     Copy-Item -LiteralPath (Join-Path $unrpycSource 'README.md') -Destination $unrpycDir -Force
-    Add-Content -LiteralPath (Join-Path $pythonDir 'python313._pth') -Value '..\unrpyc','..\rpatool' -Encoding ascii
-    Copy-Item -LiteralPath $rpatoolFile -Destination (Join-Path $rpaDir 'rpatool.py') -Force
+    Add-Content -LiteralPath (Join-Path $pythonDir 'python313._pth') -Value '..\unrpyc' -Encoding ascii
     Copy-Item -LiteralPath (Join-Path $repoRoot 'tools\safe_rpa_extract.py') -Destination (Join-Path $rpaDir 'safe_rpa_extract.py') -Force
     Copy-Item -LiteralPath $lockPath -Destination (Join-Path $output 'tool-runtime.lock.json') -Force
     $manifest = [ordered]@{

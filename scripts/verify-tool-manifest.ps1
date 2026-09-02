@@ -26,7 +26,7 @@ foreach ($entry in $manifest.files) {
     [void]$listed.Add(($relative -replace '\\', '/'))
 }
 
-$required = @('python/python.exe', 'rpatool/rpatool.py', 'rpatool/safe_rpa_extract.py', 'unrpyc/unrpyc.py')
+$required = @('python/python.exe', 'rpa/safe_rpa_extract.py', 'unrpyc/unrpyc.py')
 foreach ($relative in $required) {
     if (-not $listed.Contains($relative)) { throw "必要工具未纳入清单：$relative" }
 }

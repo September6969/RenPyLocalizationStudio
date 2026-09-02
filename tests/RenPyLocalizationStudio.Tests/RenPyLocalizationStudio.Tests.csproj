@@ -21,6 +21,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Content Include="TestData\**\*" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\..\src\RenPyLocalizationStudio.Core\RenPyLocalizationStudio.Core.csproj" />
     <ProjectReference Include="..\..\src\RenPyLocalizationStudio.App\RenPyLocalizationStudio.App.csproj" />
     <ProjectReference Include="..\RenPyLocalizationStudio.ProcessTestHelper\RenPyLocalizationStudio.ProcessTestHelper.csproj" ReferenceOutputAssembly="false" />

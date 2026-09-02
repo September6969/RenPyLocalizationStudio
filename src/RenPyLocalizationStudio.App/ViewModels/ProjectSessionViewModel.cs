@@ -27,7 +27,7 @@ public sealed class ProjectSessionViewModel : ObservableObject
     private string _projectPath = string.Empty;
     private string _language = string.Empty;
     private string _sdkPath = string.Empty;
-    private bool _autoSaveEnabled = true;
+    private bool _autoSaveEnabled;
     private string? _lastTranslationItemId;
     private string? _lastTranslationViewMode;
     private string? _lastTranslationGroupingMode;

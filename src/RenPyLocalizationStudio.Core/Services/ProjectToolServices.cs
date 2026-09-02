@@ -181,6 +181,9 @@ public interface IImageCompressionService
 public sealed class ImageCompressionService(IFileSystemService fileSystem) : IImageCompressionService
 {
     private static readonly HashSet<string> SupportedExtensions = new(StringComparer.OrdinalIgnoreCase) { ".png", ".jpg", ".jpeg", ".webp" };
+    internal const long MaximumSourceBytes = 256L * 1024 * 1024;
+    internal const long MaximumDecodedPixels = 100_000_000;
+    internal const int MaximumDimension = 32_768;
 
     public async Task<OperationResult<ImageCompressionPlan>> PlanAsync(
         ImageCompressionPlanRequest request,
@@ -213,7 +216,7 @@ public sealed class ImageCompressionService(IFileSystemService fileSystem) : IIm
             if (cancellationToken.IsCancellationRequested)
                 return OperationResult<ImageCompressionPlan>.Cancelled(new Diagnostic(DiagnosticSeverity.Info, "OPERATION_CANCELLED", "图片压缩预览已取消。"));
             var source = sources[index];
-            var read = await fileSystem.ReadBytesAsync(source, cancellationToken).ConfigureAwait(false);
+            var read = await fileSystem.ReadBytesAsync(source, MaximumSourceBytes, cancellationToken).ConfigureAwait(false);
             if (!read.IsSuccess || read.Value is null) { diagnostics.AddRange(read.Diagnostics); continue; }
             var targetRelative = request.ReplaceOriginals
                 ? source.RelativePath
@@ -268,7 +271,7 @@ public sealed class ImageCompressionService(IFileSystemService fileSystem) : IIm
             {
                 diagnostics.AddRange(source.Diagnostics.Concat(target.Diagnostics)); skipped++; continue;
             }
-            var read = await fileSystem.ReadBytesAsync(source.Value, cancellationToken).ConfigureAwait(false);
+            var read = await fileSystem.ReadBytesAsync(source.Value, MaximumSourceBytes, cancellationToken).ConfigureAwait(false);
             if (!read.IsSuccess || read.Value is null) { diagnostics.AddRange(read.Diagnostics); skipped++; continue; }
             if (!read.Value.Sha256.Equals(item.SourceSha256, StringComparison.OrdinalIgnoreCase))
             {
@@ -302,6 +305,7 @@ public sealed class ImageCompressionService(IFileSystemService fileSystem) : IIm
             using var codec = SKCodec.Create(stream);
             if (codec is null) { reason = "无法识别图片编码"; return null; }
             if (codec.FrameCount > 1) { reason = "动画图片不会被扁平化压缩"; return null; }
+            if (!ValidateResourceLimits(content.LongLength, codec.Info.Width, codec.Info.Height, out reason)) return null;
             using var bitmap = SKBitmap.Decode(content);
             if (bitmap is null) { reason = "图片解码失败"; return null; }
             using var image = SKImage.FromBitmap(bitmap);
@@ -321,6 +325,23 @@ public sealed class ImageCompressionService(IFileSystemService fileSystem) : IIm
             reason = $"图片处理失败：{ex.Message}";
             return null;
         }
+    }
+
+    internal static bool ValidateResourceLimits(long sourceBytes, int width, int height, out string reason)
+    {
+        if (sourceBytes < 0 || sourceBytes > MaximumSourceBytes)
+        {
+            reason = $"图片文件超过 {MaximumSourceBytes / 1024 / 1024} MiB 上限";
+            return false;
+        }
+        if (width <= 0 || height <= 0 || width > MaximumDimension || height > MaximumDimension ||
+            (long)width * height > MaximumDecodedPixels)
+        {
+            reason = $"图片尺寸 {width}×{height} 超过 {MaximumDecodedPixels:N0} 像素或单边 {MaximumDimension:N0} 上限";
+            return false;
+        }
+        reason = string.Empty;
+        return true;
     }
 
     private static bool IsInScope(ValidatedProjectPath path, ImageCompressionPlanRequest request)

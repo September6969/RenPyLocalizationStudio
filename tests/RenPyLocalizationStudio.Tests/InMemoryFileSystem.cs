@@ -91,11 +91,20 @@ internal sealed class InMemoryFileSystem : IFileSystemService
     }
 
     public Task<OperationResult<BinaryFileContent>> ReadBytesAsync(ValidatedProjectPath path, CancellationToken cancellationToken)
+        => ReadBytesAsync(path, long.MaxValue, cancellationToken);
+
+    public Task<OperationResult<BinaryFileContent>> ReadBytesAsync(
+        ValidatedProjectPath path,
+        long maximumBytes,
+        CancellationToken cancellationToken)
     {
         if (!_files.TryGetValue(Normalize(path.RelativePath), out var bytes))
         {
             return Task.FromResult(OperationResult<BinaryFileContent>.Failure(Error("BINARY_READ_FAILED", path.RelativePath)));
         }
+
+        if (bytes.LongLength > maximumBytes)
+            return Task.FromResult(OperationResult<BinaryFileContent>.Failure(Error("BINARY_FILE_TOO_LARGE", path.RelativePath)));
 
         return Task.FromResult(OperationResult<BinaryFileContent>.Success(
             new BinaryFileContent(bytes.ToArray(), Convert.ToHexString(SHA256.HashData(bytes)))));

@@ -165,16 +165,16 @@ def sha256_file(path):
 
 
 def main():
-    plan_only = len(sys.argv) == 5 and sys.argv[1] == "--plan"
+    plan_only = len(sys.argv) == 4 and sys.argv[1] == "--plan"
     expected_hash = None
-    if not plan_only and len(sys.argv) == 6 and sys.argv[1] == "--expected-sha256":
+    if not plan_only and len(sys.argv) == 5 and sys.argv[1] == "--expected-sha256":
         expected_hash = sys.argv[2].upper()
         arguments = sys.argv[3:]
     else:
         arguments = sys.argv[2:] if plan_only else sys.argv[1:]
-    if len(arguments) != 3:
-        raise SystemExit("usage: safe_rpa_extract.py [--plan | --expected-sha256 HASH] <rpatool> <archive> <output>")
-    _tool_path, archive_path, output_path = map(os.path.abspath, arguments)
+    if len(arguments) != 2:
+        raise SystemExit("usage: safe_rpa_extract.py [--plan | --expected-sha256 HASH] <archive> <output>")
+    archive_path, output_path = map(os.path.abspath, arguments)
     initial_hash = sha256_file(archive_path)
     if expected_hash is not None and initial_hash != expected_hash:
         raise ValueError("archive changed after plan confirmation")

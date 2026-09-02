@@ -12,12 +12,6 @@
       "url": "https://codeload.github.com/CensoredUsername/unrpyc/zip/refs/tags/v2.0.4",
       "fileName": "unrpyc-2.0.4.zip",
       "sha256": "DF7446D89F68A9A94A62378248DA875E9E75E983BF81DE53D92B2C19F359673E"
-    },
-    "rpatool": {
-      "version": "74f26d5dfdd645483e02552aa766ca447ad6b191",
-      "url": "https://raw.githubusercontent.com/Shizmob/rpatool/74f26d5dfdd645483e02552aa766ca447ad6b191/rpatool",
-      "fileName": "rpatool-74f26d5.py",
-      "sha256": "D343124CEBD832F712540CC6468253F7E303979467E11C7490807F42C13963F1"
     }
   }
 }

@@ -445,7 +445,7 @@ public sealed record AppSettings(
     string? LastLanguage,
     string AccentColor,
     string? SdkPath = null,
-    bool AutoSaveEnabled = true,
+    bool AutoSaveEnabled = false,
     string? LastTranslationItemId = null,
     string? LastTranslationViewMode = null,
     string? LastTranslationGroupingMode = null);

@@ -71,8 +71,7 @@ public sealed class ToolRuntimeManifestValidatorTests
         var relativePaths = new[]
         {
             "python/python.exe",
-            "rpatool/rpatool.py",
-            "rpatool/safe_rpa_extract.py",
+            "rpa/safe_rpa_extract.py",
             "unrpyc/unrpyc.py"
         };
         var files = new List<object>();

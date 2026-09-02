@@ -6,7 +6,7 @@
 
 RenPy Localization Studio 是一个面向 Windows 的 Ren’Py 人工汉化工作台，原项目名为 RenPyFlowTranslator。
 
-- 仓库：`E:\RenPyFlowTranslator`
+- 仓库：以当前 Git checkout 根目录为准；不要依赖开发者本机盘符。
 - 解决方案：`RenPyLocalizationStudio.sln`
 - 技术栈：.NET 10、WPF、Windows x64、简体中文
 - 应用项目：`src/RenPyLocalizationStudio.App`
@@ -14,8 +14,8 @@ RenPy Localization Studio 是一个面向 Windows 的 Ren’Py 人工汉化工�
 - 测试项目：`tests/RenPyLocalizationStudio.Tests`
 - 默认发布目录：`artifacts\win-x64`
 - 主程序：`artifacts\win-x64\RenPyLocalizationStudio.exe`
-- 当前版本：`0.3.9`
-- 发布方式：框架依赖，不是单文件或自包含包；目标机器需要 .NET 10 Desktop Runtime
+- 当前版本：`0.3.10`
+- 发布方式：默认框架依赖；也可生成 Windows x64 自包含包。
 
 项目不接入机翻或模型 API，不执行游戏 EXE，不自动启动游戏，不修改原始源码来包裹 `_()`，不删除 `.rpa`、`.rpyc` 或 `.rpymc`。
 
@@ -24,9 +24,9 @@ RenPy Localization Studio 是一个面向 Windows 的 Ren’Py 人工汉化工�
 截至 2026-09-01：
 
 - Release 构建通过，0 警告、0 错误。
-- .NET 自动化测试共 113 项，另有 4 项 Python RPA 安全测试，全部通过。
-- 使用本机 `E:\renpy-8.5.2-sdk\renpy.exe` 对临时项目副本执行 lint，已通过。
-- 框架依赖发布由 `scripts/publish.ps1` 生成到被忽略的 `artifacts\win-x64`；本地清理后按需重新生成，正式包以 GitHub Release 为准。
+- .NET 自动化测试共 122 项，另有 6 项 Python RPA 安全测试，全部通过。
+- 已使用 Ren’Py 8.5.2 SDK 对临时项目副本执行 lint；脚本通过 `-SdkExe` 或 `RLS_RENPY_SDK` 接收路径，不依赖固定盘符。
+- 框架依赖发布由 `scripts/publish.ps1` 生成到被忽略的 `artifacts\win-x64`；`-SelfContained` 生成自包含包到 `artifacts\win-x64-self-contained`。正式包以 GitHub Release 为准。
 - 发布版已经完成启动烟测。
 - 已建立可审阅的 Git 基线与分层重构提交；仍不得使用破坏性 Git 命令覆盖用户改动。
 
@@ -205,7 +205,7 @@ Tab 崩溃的根因已经确认：`TextDocument.Insert` 会自动移动 Caret，
 ## 8. 已知风险与未完全覆盖项
 
 1. **补全交互测试不足**：自动化测试覆盖 Tab 不崩溃和缩进结果；WPF UI 自动化对补全弹窗焦点/Tab 接受的模拟仍不稳定，后续应增加专用 STA 交互测试。
-2. **首次完整发布需要网络**：Python、unrpyc 与 rpatool 下载物已在 `tools/tool-runtime.lock.json` 固定版本、URL 和 SHA-256；缓存命中后可复用，但全新环境仍需访问上游。
+2. **首次完整发布需要网络**：Python 与 unrpyc 下载物已在 `tools/tool-runtime.lock.json` 固定版本、URL 和 SHA-256；缓存命中后可复用，但全新环境仍需访问上游。
 3. **真实 UI 性能**：Core 已覆盖十万节点解析与非递归 StoryPath 投影，仍应继续测量 WPF 容器数量、图片内存和滚动锚点恢复。
 4. **RPYC 兼容范围**：固定 unrpyc 2.0.4，遇到未知 Ren’Py 节点或新格式必须返回诊断，不要尝试运行游戏脚本。
 5. **SDK 自动检测**：版本排序已按数值 `Version` 处理；多安装目录、权限受限机器和便携 SDK 仍需实机覆盖。
@@ -231,7 +231,7 @@ Get-Content -Encoding UTF8 .\PROJECT_HANDOFF.md
 还原、构建和测试：
 
 ```powershell
-cd E:\RenPyFlowTranslator
+cd <当前 Git checkout 根目录>
 dotnet restore .\RenPyLocalizationStudio.sln
 dotnet test .\RenPyLocalizationStudio.sln -c Release
 ```
@@ -248,10 +248,16 @@ dotnet run --project .\src\RenPyLocalizationStudio.App\RenPyLocalizationStudio.A
 .\scripts\publish.ps1
 ```
 
+自包含发布：
+
+```powershell
+.\scripts\publish.ps1 -SelfContained -Package
+```
+
 Ren’Py 8.5.2 临时副本 lint：
 
 ```powershell
-.\scripts\verify-sdk-lint.ps1 -SdkExe E:\renpy-8.5.2-sdk\renpy.exe
+.\scripts\verify-sdk-lint.ps1 -SdkExe <RenPy-SDK目录>\renpy.exe
 ```
 
 ## 11. 接手时必须遵守
@@ -263,14 +269,14 @@ Ren’Py 8.5.2 临时副本 lint：
 - 不执行用户提供的未知 EXE。
 - 不运行游戏 EXE，不执行游戏 Python。
 - 不删除游戏归档、编译脚本或用户翻译。
-- 不自动保存；所有实际项目写入由用户明确确认。
+- 自动保存默认关闭；用户可在“更多设置”显式开启译文防抖自动保存，结构警告仍要求手动确认。
 - 保持 Core 与 WPF 隔离，ViewModel 不持有控件实例。
 - 修改完成后至少运行 Release 测试；涉及保存或生成时再运行 Ren’Py lint。
 
 ## 12. 给下一位 AI 的最短启动指令
 
 ```text
-扫描 E:\RenPyFlowTranslator，先完整阅读 PROJECT_HANDOFF.md、README.md、根目录约束和相关测试。
+扫描当前 Git checkout，先完整阅读 PROJECT_HANDOFF.md、README.md、根目录约束和相关测试。
 检查 git status，保留用户尚未提交的工作树改动。
 先运行 dotnet test .\RenPyLocalizationStudio.sln -c Release 建立当前基准。
 任何 UI/保存/外部工具修改都必须检查真实实现并做对应回归，不要只改界面文字。

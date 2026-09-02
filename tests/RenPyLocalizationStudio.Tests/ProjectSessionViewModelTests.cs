@@ -21,6 +21,7 @@ public sealed class ProjectSessionViewModelTests
 
             Assert.Equal(OperationStatus.Failed, result.Status);
             Assert.Equal("#D16BA5", result.Value?.AccentColor);
+            Assert.False(result.Value?.AutoSaveEnabled);
             Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == "SETTINGS_JSON_INVALID");
         }
         finally

@@ -6,7 +6,7 @@ using RenPyLocalizationStudio.Core.Services;
 
 namespace RenPyLocalizationStudio.App.Services;
 
-public sealed record ToolRuntimePaths(string Python, string RpaTool, string Unrpyc);
+public sealed record ToolRuntimePaths(string Python, string SafeRpaExtractor, string Unrpyc);
 
 /// <summary>启动第三方工具前校验发布 manifest，避免运行时文件被替换或发布包残缺。</summary>
 public static class ToolRuntimeManifestValidator
@@ -51,9 +51,9 @@ public static class ToolRuntimeManifestValidator
 
             var paths = new ToolRuntimePaths(
                 Path.Combine(tools, "python", "python.exe"),
-                Path.Combine(tools, "rpatool", "rpatool.py"),
+                Path.Combine(tools, "rpa", "safe_rpa_extract.py"),
                 Path.Combine(tools, "unrpyc", "unrpyc.py"));
-            foreach (var required in new[] { paths.Python, paths.RpaTool, paths.Unrpyc, Path.Combine(tools, "rpatool", "safe_rpa_extract.py") })
+            foreach (var required in new[] { paths.Python, paths.SafeRpaExtractor, paths.Unrpyc })
             {
                 var relative = Path.GetRelativePath(tools, required);
                 if (!listed.Contains(relative))

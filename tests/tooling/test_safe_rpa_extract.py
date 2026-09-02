@@ -74,6 +74,32 @@ class SafeRpaExtractTests(unittest.TestCase):
         finally:
             SAFE_RPA.MAX_ENTRY_BYTES = old_limit
 
+    def test_rejects_path_traversal_and_windows_reserved_names(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            output = pathlib.Path(temporary) / "output"
+            output.mkdir()
+            for name in ("../escape.txt", "/absolute.txt", "dir/../../escape.txt", "CON.txt", "dir/NUL"):
+                with self.subTest(name=name), self.assertRaises(ValueError):
+                    SAFE_RPA.safe_target(output, name)
+
+    def test_reads_rpa30_xor_index(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            archive = root / "rpa30.rpa"
+            data = b"rpa30"
+            key = 0x12345678
+            header_size = len(b"RPA-3.0 00000000 12345678\n")
+            index_offset = header_size + len(data)
+            header = b"RPA-3.0 %08x %08x\n" % (index_offset, key)
+            index = {"dir/a.txt": [(len(header) ^ key, len(data) ^ key)]}
+            archive.write_bytes(header + data + zlib.compress(pickle.dumps(index, protocol=2)))
+
+            name, segments, length = SAFE_RPA.read_index(archive)[0]
+
+            self.assertEqual("dir/a.txt", name)
+            self.assertEqual(len(data), length)
+            self.assertEqual((len(header), len(data), b""), segments[0])
+
 
 if __name__ == "__main__":
     unittest.main()

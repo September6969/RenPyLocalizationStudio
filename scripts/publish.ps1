@@ -1,12 +1,16 @@
 param(
-    [string]$OutputDirectory = (Join-Path (Split-Path -Parent $PSScriptRoot) 'artifacts\win-x64'),
-    [switch]$Package
+    [string]$OutputDirectory,
+    [switch]$Package,
+    [switch]$SelfContained
 )
 
 $ErrorActionPreference = 'Stop'
 $OutputEncoding = [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
 chcp 65001 > $null
 $repoRoot = Split-Path -Parent $PSScriptRoot
+if ([string]::IsNullOrWhiteSpace($OutputDirectory)) {
+    $OutputDirectory = Join-Path $repoRoot $(if ($SelfContained) { 'artifacts\win-x64-self-contained' } else { 'artifacts\win-x64' })
+}
 $output = [System.IO.Path]::GetFullPath($OutputDirectory)
 $artifactsRoot = [System.IO.Path]::GetFullPath((Join-Path $repoRoot 'artifacts'))
 $artifactsPrefix = $artifactsRoot.TrimEnd([System.IO.Path]::DirectorySeparatorChar) + [System.IO.Path]::DirectorySeparatorChar
@@ -22,14 +26,16 @@ if ([string]::IsNullOrWhiteSpace($version)) { throw '无法从应用项目读取
 if (Test-Path -LiteralPath $output) { Remove-Item -LiteralPath $output -Recurse -Force }
 New-Item -ItemType Directory -Path $output -Force | Out-Null
 
-dotnet publish $projectPath -c Release -r win-x64 --self-contained false -o $output
+$selfContainedValue = $SelfContained.IsPresent.ToString().ToLowerInvariant()
+dotnet publish $projectPath -c Release -r win-x64 --self-contained $selfContainedValue -o $output
 if ($LASTEXITCODE -ne 0) { throw "dotnet publish 失败，退出码：$LASTEXITCODE" }
 & (Join-Path $PSScriptRoot 'prepare-tool-runtime.ps1') -OutputDirectory (Join-Path $output 'tools')
 Get-ChildItem -LiteralPath $output -Filter '*.pdb' -File -Recurse | Remove-Item -Force
 
 if ($Package) {
     $releaseDirectory = Join-Path $repoRoot 'artifacts\release'
-    $archive = Join-Path $releaseDirectory "RenPyLocalizationStudio-v$version-win-x64-framework-dependent.zip"
+    $deploymentName = if ($SelfContained) { 'self-contained' } else { 'framework-dependent' }
+    $archive = Join-Path $releaseDirectory "RenPyLocalizationStudio-v$version-win-x64-$deploymentName.zip"
     New-Item -ItemType Directory -Path $releaseDirectory -Force | Out-Null
     if (Test-Path -LiteralPath $archive) { Remove-Item -LiteralPath $archive -Force }
     if (Test-Path -LiteralPath "$archive.sha256") { Remove-Item -LiteralPath "$archive.sha256" -Force }

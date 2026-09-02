@@ -6,6 +6,18 @@ namespace RenPyLocalizationStudio.Tests;
 public sealed class ProjectToolServiceTests
 {
     [Fact]
+    public void ImageCompression_拒绝超大解码尺寸和源文件()
+    {
+        Assert.False(ImageCompressionService.ValidateResourceLimits(
+            ImageCompressionService.MaximumSourceBytes + 1, 1, 1, out var byteReason));
+        Assert.False(ImageCompressionService.ValidateResourceLimits(
+            1024, 20_000, 20_000, out var pixelReason));
+        Assert.True(ImageCompressionService.ValidateResourceLimits(1024, 1920, 1080, out _));
+        Assert.Contains("MiB", byteReason);
+        Assert.Contains("像素", pixelReason);
+    }
+
+    [Fact]
     public async Task PrefixRename_预览冲突且只执行安全项()
     {
         using var project = new TemporaryToolProject();

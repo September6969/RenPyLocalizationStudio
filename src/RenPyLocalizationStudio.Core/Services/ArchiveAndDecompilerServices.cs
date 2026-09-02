@@ -3,7 +3,7 @@ using System.Text;
 
 namespace RenPyLocalizationStudio.Core.Services;
 
-public sealed record ArchiveExtractionRequest(ProjectRoot Project, ValidatedToolPath Python, ValidatedToolPath RpaTool,
+public sealed record ArchiveExtractionRequest(ProjectRoot Project, ValidatedToolPath Python, ValidatedToolPath SafeExtractor,
     IReadOnlyList<string> ArchiveRelativePaths, string OutputRelativeDirectory, bool Confirmed, string? ConfirmedPlanFingerprint = null);
 public sealed record ArchiveExtractionSummary(int ProcessedArchives, string OutputRelativeDirectory, IReadOnlyList<string> PreservedArchives);
 public enum ToolPlanDisposition { Ready, Skipped, Error }
@@ -43,18 +43,15 @@ public sealed class ArchiveExtractionService : IArchiveExtractionService
         if (!output.IsSuccess || output.Value is null) return new(OperationStatus.Failed, null, output.Diagnostics);
         var python = _fileSystem.ValidateExecutable(request.Python.FullPath);
         if (!python.IsSuccess || python.Value is null) return new(OperationStatus.Failed, null, python.Diagnostics);
-        var wrapper = Path.Combine(Path.GetDirectoryName(request.RpaTool.FullPath)!, "safe_rpa_extract.py");
-        var rpaTool = _fileSystem.ValidateToolPath(request.RpaTool.FullPath);
-        var wrapperTool = _fileSystem.ValidateToolPath(wrapper);
-        if (!rpaTool.IsSuccess || rpaTool.Value is null) return new(OperationStatus.Failed, null, rpaTool.Diagnostics);
-        if (!wrapperTool.IsSuccess || wrapperTool.Value is null) return OperationResult<ArchiveExtractionPlan>.Failure(Security("SAFE_EXTRACTOR_MISSING", "安全解包入口缺失或不安全。"));
+        var extractor = _fileSystem.ValidateToolPath(request.SafeExtractor.FullPath);
+        if (!extractor.IsSuccess || extractor.Value is null)
+            return OperationResult<ArchiveExtractionPlan>.Failure(Security("SAFE_EXTRACTOR_MISSING", "安全解包入口缺失或不安全。"));
 
         var items = new List<ArchiveExtractionPlanItem>();
         var diagnostics = new List<Diagnostic>();
         var archiveHashes = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var fingerprintMaterial = new StringBuilder()
-            .Append(wrapperTool.Value.Sha256).Append('\n')
-            .Append(rpaTool.Value.Sha256).Append('\n');
+            .Append(extractor.Value.Sha256).Append('\n');
         foreach (var relative in request.ArchiveRelativePaths)
         {
             if (cancellationToken.IsCancellationRequested)
@@ -68,7 +65,7 @@ public sealed class ArchiveExtractionService : IArchiveExtractionService
                 continue;
             }
             var result = await _runner.ExecuteAsync(new ProcessExecutionPlan(python.Value, request.Project.FullPath,
-                [wrapperTool.Value.FullPath, "--plan", rpaTool.Value.FullPath, archive.Value.FullPath, output.Value.FullPath],
+                [extractor.Value.FullPath, "--plan", archive.Value.FullPath, output.Value.FullPath],
                 SafePythonEnvironment(), TimeSpan.FromMinutes(10), TimeSpan.FromMinutes(2), TimeSpan.FromSeconds(3), MaxCapturedOutputCharacters: 8_000_000),
                 progress, cancellationToken).ConfigureAwait(false);
             if (result.Status == OperationStatus.Cancelled) return new(OperationStatus.Cancelled, new ArchiveExtractionPlan(items), diagnostics);
@@ -136,10 +133,8 @@ public sealed class ArchiveExtractionService : IArchiveExtractionService
         if (!output.IsSuccess || output.Value is null) return new(OperationStatus.Failed, null, output.Diagnostics);
         var python = _fileSystem.ValidateExecutable(request.Python.FullPath);
         if (!python.IsSuccess || python.Value is null) return new(OperationStatus.Failed, null, python.Diagnostics);
-        var rpaTool = _fileSystem.ValidateToolPath(request.RpaTool.FullPath);
-        var wrapperTool = _fileSystem.ValidateToolPath(Path.Combine(Path.GetDirectoryName(request.RpaTool.FullPath)!, "safe_rpa_extract.py"));
-        if (!rpaTool.IsSuccess || rpaTool.Value is null) return new(OperationStatus.Failed, null, rpaTool.Diagnostics);
-        if (!wrapperTool.IsSuccess || wrapperTool.Value is null) return new(OperationStatus.Failed, null, wrapperTool.Diagnostics);
+        var extractor = _fileSystem.ValidateToolPath(request.SafeExtractor.FullPath);
+        if (!extractor.IsSuccess || extractor.Value is null) return new(OperationStatus.Failed, null, extractor.Diagnostics);
         var diagnostics = new List<Diagnostic>(); var processed = 0; var preserved = new List<string>();
         foreach (var relative in request.ArchiveRelativePaths)
         {
@@ -153,7 +148,7 @@ public sealed class ArchiveExtractionService : IArchiveExtractionService
                 continue;
             }
             var result = await _runner.ExecuteAsync(new ProcessExecutionPlan(python.Value, request.Project.FullPath,
-                [wrapperTool.Value.FullPath, "--expected-sha256", expectedArchiveHash, rpaTool.Value.FullPath, archive.Value.FullPath, output.Value.FullPath], SafePythonEnvironment(),
+                [extractor.Value.FullPath, "--expected-sha256", expectedArchiveHash, archive.Value.FullPath, output.Value.FullPath], SafePythonEnvironment(),
                 TimeSpan.FromHours(1), TimeSpan.FromMinutes(2), TimeSpan.FromSeconds(3)), progress, cancellationToken).ConfigureAwait(false);
             diagnostics.AddRange(result.Diagnostics); if (result.IsSuccess) processed++; preserved.Add(relative);
         }

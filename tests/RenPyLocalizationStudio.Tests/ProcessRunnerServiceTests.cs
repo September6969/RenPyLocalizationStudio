@@ -79,6 +79,20 @@ public sealed class ProcessRunnerServiceTests
         }
     }
 
+    [Fact]
+    public async Task Execute_可执行文件哈希与验证结果不一致时拒绝启动()
+    {
+        var dotnet = Environment.GetEnvironmentVariable("DOTNET_HOST_PATH") ??
+            Path.Combine(Environment.GetEnvironmentVariable("DOTNET_ROOT") ?? "C:\\Program Files\\dotnet", "dotnet.exe");
+        var plan = new ProcessExecutionPlan(new ValidatedExecutablePath(dotnet, "00"), AppContext.BaseDirectory,
+            ["--info"], new Dictionary<string, string?>(), TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(2), TimeSpan.Zero);
+
+        var result = await new ProcessRunnerService().ExecuteAsync(plan, new CollectingProgress(), CancellationToken.None);
+
+        Assert.Equal(OperationStatus.Failed, result.Status);
+        Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == "EXECUTABLE_CHANGED");
+    }
+
     private static Task<OperationResult<ProcessExecutionSummary>> ExecuteAsync(
         string mode,
         TimeSpan timeout,

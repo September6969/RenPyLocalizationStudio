@@ -1,6 +1,6 @@
 # RenPy Localization Studio
 
-当前版本：**v0.3.9**。
+当前版本：**v0.3.10**。
 
 RenPy Localization Studio 是一个面向 Ren’Py 人工本地化流程的 Windows 桌面工作台。它把 tl 生成、剧情流翻译、额外文本、替换规则、`zzz.rpy` 补丁以及解包/反编译安全服务收敛到同一项目界面。
 
@@ -23,11 +23,11 @@ RenPy Localization Studio 是一个面向 Ren’Py 人工本地化流程的 Wind
 - 可在代码行右键添加/移除书签，并通过“书签”选项卡快速筛选和定位；书签仅保存在当前会话中。
 - 在“书签”视图单击、双击、按 `Enter` 或使用“定位原代码”可回到完整剧情流中的原始文件与行号。
 - `Alt+↓` 遇到可解析的 `jump` 时会跟随目标 label，直接进入目标分支的下一条可编辑译文。
-- “更多设置”可开启译文防抖自动保存（停止输入约 0.9 秒后写入）；项目、分组和上次选中条目会保存到用户设置并在下次分析后恢复。
+- “更多设置”可选择开启译文防抖自动保存（默认关闭；停止输入约 0.9 秒后写入）；项目、分组和上次选中条目会保存到用户设置并在下次分析后恢复。
 - `Alt+←` / `Alt+→` 在编辑器中保留单词移动；离开编辑器后会拦截，避免误触历史或窗口导航。
 - 扫描 Character、screen、input、notify、define/default 等额外文本，人工确认后写入受管补丁。
 - 校验精确 replace 规则，并使用受管区块生成 `zzz.rpy`。
-- 解包/反编译服务强制项目内路径、冲突跳过和源文件保留策略。
+- 解包/反编译服务强制项目内路径、冲突跳过和源文件保留策略。RPA 与 RPYC 都会使用受限反序列化器解析不可信索引或 AST；不会执行游戏脚本，但解析复杂二进制格式仍存在第三方解析器风险。
 - 批量移除文件名前缀，默认兼容 `x-`，执行前显示完整映射并阻断同名冲突与预览后的外部修改。
 - YAC 图片压缩工作流支持 PNG、JPEG 和静态 WebP；默认输出到项目内独立目录，也可显式选择原位替换并创建 `.rls.bak`。
 - 深色 IDE 工作台、Mica 渐进增强、三套强调色与自定义色、AvalonEdit 纯文本编辑器和占位符令牌栏。
@@ -53,19 +53,26 @@ dotnet run --project .\src\RenPyLocalizationStudio.App\RenPyLocalizationStudio.A
 使用本机 Ren’Py SDK 对临时夹具执行安全 lint：
 
 ```powershell
-.\scripts\verify-sdk-lint.ps1 -SdkExe E:\renpy-8.5.2-sdk\renpy.exe
+.\scripts\verify-sdk-lint.ps1 -SdkExe <RenPy-SDK目录>\renpy.exe
 ```
 
-发布 Windows x64 程序（需要 .NET 10 Desktop Runtime）：
+发布 Windows x64 程序：
 
 ```powershell
 .\scripts\publish.ps1
+# 可选：生成无需预装 .NET Desktop Runtime 的自包含目录
+.\scripts\publish.ps1 -SelfContained
 ```
 
-默认发布目录为 `artifacts\win-x64`。主程序为框架依赖版本，目标电脑必须安装 **.NET 10 Desktop Runtime x64**。官方 Release 已包含校验过的隔离 Python、unrpyc 与 rpatool 运行时，不需要另外下载归档工具。
+默认发布目录为 `artifacts\win-x64`。框架依赖包要求目标电脑安装 **.NET 10 Desktop Runtime x64**；`-SelfContained` 生成的包无需预装 Runtime，但体积更大。两种包都只支持 Windows x64，并包含校验过的隔离 Python、unrpyc 与内置安全 RPA 读取器。
 
 生成可发布 ZIP 与 SHA-256：
 
 ```powershell
 .\scripts\publish.ps1 -Package
+.\scripts\publish.ps1 -SelfContained -Package
 ```
+
+## 许可证
+
+项目源码采用保留所有权利的专有许可，具体见 [LICENSE](LICENSE)。打包的开源依赖仍分别遵循其自身许可证，详见 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) 与 `licenses/`。

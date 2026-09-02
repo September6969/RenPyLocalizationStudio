@@ -632,7 +632,7 @@ public sealed class ArchiveWorkspaceViewModel : WorkspaceViewModelBase
             archives = files.Value.Select(x => x.RelativePath).ToArray();
             if (archives.Length == 0) { planCompleted = true; return; }
             var plan = await _archive.PlanAsync(new ArchiveExtractionRequest(root.Value,
-                new ValidatedToolPath(runtime.Python), new ValidatedToolPath(runtime.RpaTool), archives, gameDirectory, false),
+                new ValidatedToolPath(runtime.Python), new ValidatedToolPath(runtime.SafeRpaExtractor), archives, gameDirectory, false),
                 _session.Tasks.CreateProgress(), token);
             if (!plan.IsSuccess || plan.Value is null)
             {
@@ -656,7 +656,7 @@ public sealed class ArchiveWorkspaceViewModel : WorkspaceViewModelBase
             _session.Tasks.StatusMessage = "项目已切换，RPA 计划已失效。";
             return;
         }
-        if (!_confirmation.Confirm("RPA 解包计划", $"计划写入 {extractionPlan.ReadyCount:N0} 项、跳过 {extractionPlan.SkippedCount:N0} 项；源 RPA 永不删除。确认继续？", MessageBoxImage.Warning))
+        if (!_confirmation.Confirm("RPA 解包计划", $"计划写入 {extractionPlan.ReadyCount:N0} 项、跳过 {extractionPlan.SkippedCount:N0} 项；源 RPA 永不删除。工具会用受限 pickle 解析归档索引，不会执行游戏脚本，但复杂格式解析仍有残余风险。确认继续？", MessageBoxImage.Warning))
         {
             _session.Tasks.StatusMessage = "已取消 RPA 解包。";
             return;
@@ -664,7 +664,7 @@ public sealed class ArchiveWorkspaceViewModel : WorkspaceViewModelBase
         await _session.Tasks.RunAsync("正在安全解包 RPA……", async token =>
         {
             var result = await _archive.ExecuteAsync(new ArchiveExtractionRequest(root.Value,
-                new ValidatedToolPath(runtime.Python), new ValidatedToolPath(runtime.RpaTool), archives,
+                new ValidatedToolPath(runtime.Python), new ValidatedToolPath(runtime.SafeRpaExtractor), archives,
                 gameDirectory, true, extractionPlan.Fingerprint), _session.Tasks.CreateProgress(), token);
             if (result.Status == OperationStatus.Cancelled) _session.Tasks.StatusMessage = "RPA 解包已取消。";
             else if (!result.IsSuccess) _confirmation.ShowDiagnostics("RPA 解包未完全成功", result.Diagnostics);
@@ -727,7 +727,7 @@ public sealed class ArchiveWorkspaceViewModel : WorkspaceViewModelBase
             _session.Tasks.StatusMessage = "项目已切换，反编译计划已失效。";
             return;
         }
-        if (!_confirmation.Confirm("RPYC 反编译计划", $"计划生成 {decompilePlan.ReadyCount:N0} 项、跳过 {decompilePlan.SkippedCount:N0} 项；编译文件永不删除。确认继续？", MessageBoxImage.Warning))
+        if (!_confirmation.Confirm("RPYC 反编译计划", $"计划生成 {decompilePlan.ReadyCount:N0} 项、跳过 {decompilePlan.SkippedCount:N0} 项；编译文件永不删除。unrpyc 会用受限反序列化器解析 AST，不会执行游戏脚本，但复杂格式解析仍有残余风险。确认继续？", MessageBoxImage.Warning))
         {
             _session.Tasks.StatusMessage = "已取消脚本反编译。";
             return;

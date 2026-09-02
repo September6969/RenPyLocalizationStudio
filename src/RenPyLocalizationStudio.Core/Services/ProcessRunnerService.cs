@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Security.Cryptography;
 
 namespace RenPyLocalizationStudio.Core.Services;
 
@@ -33,6 +34,15 @@ public sealed class ProcessRunnerService : IProcessRunnerService
 
         try
         {
+            if (!string.IsNullOrWhiteSpace(request.Executable.Sha256))
+            {
+                using var executableStream = new FileStream(request.Executable.FullPath, FileMode.Open, FileAccess.Read, FileShare.Read);
+                var actualHash = Convert.ToHexString(SHA256.HashData(executableStream));
+                if (!CryptographicOperations.FixedTimeEquals(
+                        Convert.FromHexString(request.Executable.Sha256), Convert.FromHexString(actualHash)))
+                    return OperationResult<ProcessExecutionSummary>.Failure(
+                        ProcessDiagnostic("EXECUTABLE_CHANGED", "可执行文件在验证后发生变化，已停止启动。"));
+            }
             var startInfo = new ProcessStartInfo
             {
                 FileName = request.Executable.FullPath,
@@ -126,7 +136,8 @@ public sealed class ProcessRunnerService : IProcessRunnerService
             }
             return OperationResult<ProcessExecutionSummary>.Success(summary, diagnostics.ToArray());
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException or System.ComponentModel.Win32Exception)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException or
+                                      System.ComponentModel.Win32Exception or FormatException)
         {
             return OperationResult<ProcessExecutionSummary>.Failure(ProcessDiagnostic("PROCESS_FAILED", ex.Message));
         }

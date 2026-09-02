@@ -18,6 +18,26 @@ public sealed class RenPySdkServiceTests
 
         Assert.Equal(OperationStatus.Succeeded, result.Status);
         Assert.Equal(["C:\\project", "translate", "schinese", "--empty", "--no-todo"], process.LastPlan?.Arguments);
+        Assert.Equal("1", process.LastPlan?.Environment["PYTHONUTF8"]);
+        Assert.True(process.LastPlan?.Environment.ContainsKey("SYSTEMROOT"));
+        Assert.True(process.LastPlan?.Environment.ContainsKey("windir"));
+        Assert.True(process.LastPlan?.Environment.ContainsKey("TEMP"));
+        Assert.True(process.LastPlan?.Environment.ContainsKey("TMP"));
+        Assert.Equal($"C:\\tools{Path.PathSeparator}C:\\tools\\lib\\py3-windows-x86_64", process.LastPlan?.Environment["PATH"]);
+        Assert.DoesNotContain(process.LastPlan!.Environment.Keys,
+            key => key.Contains("PROXY", StringComparison.OrdinalIgnoreCase) || key.Contains("TOKEN", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task Discover_优先识别用户指定Sdk且不依赖固定盘符()
+    {
+        var service = new RenPySdkService(new InMemoryFileSystem(), new FakeProcessRunner());
+
+        var result = await service.DiscoverAsync(new SdkDiscoveryRequest("C:\\tools"),
+            new Progress<ToolOperationProgress>(), CancellationToken.None);
+
+        var installation = Assert.Single(result.Value!);
+        Assert.Equal("C:\\tools\\renpy.exe", installation.ExecutablePath);
     }
 
     [Fact]

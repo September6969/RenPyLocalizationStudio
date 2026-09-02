@@ -72,14 +72,30 @@ jobs:
           ./scripts/publish.ps1 -Package
           $second = (Get-FileHash -LiteralPath $archive.FullName -Algorithm SHA256).Hash
           if ($first -ne $second) { throw "重复构建 ZIP 哈希不一致：$first / $second" }
+      - name: Build self-contained package
+        shell: pwsh
+        env:
+          RLS_TOOL_CACHE: ${{ github.workspace }}\.ci\tool-downloads
+        run: ./scripts/publish.ps1 -SelfContained -Package
+      - name: Verify self-contained tool runtime and reproducibility
+        shell: pwsh
+        env:
+          RLS_TOOL_CACHE: ${{ github.workspace }}\.ci\tool-downloads
+        run: |
+          ./scripts/verify-tool-manifest.ps1 -RootPath ./artifacts/win-x64-self-contained
+          $archive = Get-ChildItem artifacts/release/*-self-contained.zip | Select-Object -First 1
+          $first = (Get-FileHash -LiteralPath $archive.FullName -Algorithm SHA256).Hash
+          ./scripts/publish.ps1 -SelfContained -Package
+          $second = (Get-FileHash -LiteralPath $archive.FullName -Algorithm SHA256).Hash
+          if ($first -ne $second) { throw "自包含 ZIP 重复构建哈希不一致：$first / $second" }
       - name: Reject debug symbols
         shell: pwsh
         run: |
-          if (Get-ChildItem artifacts/win-x64 -Filter *.pdb -Recurse) { throw '发布目录包含 PDB。' }
+          if (Get-ChildItem artifacts -Filter *.pdb -Recurse) { throw '发布目录包含 PDB。' }
       - name: Upload package
         uses: actions/upload-artifact@v4
         with:
-          name: RenPyLocalizationStudio-framework-dependent
+          name: RenPyLocalizationStudio-windows-packages
           path: |
             artifacts/release/*.zip
             artifacts/release/*.sha256

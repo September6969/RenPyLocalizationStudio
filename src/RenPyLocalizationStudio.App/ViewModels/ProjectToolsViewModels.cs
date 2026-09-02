@@ -49,7 +49,7 @@ public sealed class UnrenToolViewModel : ProjectToolPanelViewModel
     public IAsyncRelayCommand ActionCommand => Operation == UnrenOperationKind.ExtractRpa ? Workspace.ExtractCommand : Workspace.DecompileCommand;
     public string SafetyDescription => Operation == UnrenOperationKind.ExtractRpa
         ? "归档条目会先执行路径越界检查；不会运行游戏 EXE，不会删除源 RPA，也不会覆盖已有文件。"
-        : "反编译只读取 RPYC/RPYMC；不会运行游戏脚本，不会删除编译文件，也不会覆盖已有 RPY。";
+        : "反编译只读取 RPYC/RPYMC；使用 unrpyc 的受限反序列化器，不会运行游戏脚本、删除编译文件或覆盖已有 RPY。";
 
     public void SelectOperation(UnrenOperationKind operation)
     {

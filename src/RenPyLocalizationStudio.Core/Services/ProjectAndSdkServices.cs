@@ -155,13 +155,7 @@ public sealed class RenPySdkService : IRenPySdkService
         await Task.Yield();
         try
         {
-            var roots = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            if (!string.IsNullOrWhiteSpace(request.PreferredPath)) roots.Add(request.PreferredPath);
-            var eRoot = new DriveInfo("E").IsReady ? "E:\\" : null;
-            if (eRoot is not null)
-            {
-                foreach (var directory in Directory.EnumerateDirectories(eRoot, "renpy-*-sdk", SearchOption.TopDirectoryOnly)) roots.Add(directory);
-            }
+            var roots = DiscoverSdkRoots(request.PreferredPath, cancellationToken);
             var list = new List<SdkInstallation>();
             foreach (var root in roots)
             {
@@ -208,12 +202,69 @@ public sealed class RenPySdkService : IRenPySdkService
         if (request.NoTodo) args.Add("--no-todo");
         var command = $"\"{request.Sdk.ExecutablePath}\" {string.Join(' ', args.Select(Quote))}";
         var process = await _processRunner.ExecuteAsync(new ProcessExecutionPlan(executable.Value, request.Sdk.RootPath, args,
-            new Dictionary<string, string?> { ["PYTHONUTF8"] = "1" }, request.Timeout ?? TimeSpan.FromHours(1), TimeSpan.FromMinutes(2), TimeSpan.FromSeconds(3)), progress, cancellationToken).ConfigureAwait(false);
+            CreateSdkEnvironment(request.Sdk), request.Timeout ?? TimeSpan.FromHours(1), TimeSpan.FromMinutes(2), TimeSpan.FromSeconds(3)), progress, cancellationToken).ConfigureAwait(false);
         if (process.Value is null) return new(process.Status, null, process.Diagnostics);
         var summary = new SdkTranslationSummary(command, process.Value.ExitCode, process.Value.StandardOutput + Environment.NewLine + process.Value.StandardError, process.Value.Duration);
         return new(process.Status, summary, process.Diagnostics);
     }
     private static string Quote(string value) => value.Contains(' ') ? $"\"{value.Replace("\"", "\\\"")}\"" : value;
+    private static IReadOnlyCollection<string> DiscoverSdkRoots(string? preferredPath, CancellationToken cancellationToken)
+    {
+        var roots = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (!string.IsNullOrWhiteSpace(preferredPath)) roots.Add(Path.GetFullPath(preferredPath));
+
+        var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        var searchLocations = new[]
+        {
+            Path.Combine(localAppData, "RenPy"),
+            Path.Combine(localAppData, "Programs", "RenPy"),
+            Path.Combine(userProfile, "Downloads"),
+            Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory),
+            Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "RenPy"),
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "RenPy"),
+            Path.Combine(Path.GetPathRoot(Environment.SystemDirectory) ?? "C:\\", "RenPy")
+        };
+        foreach (var location in searchLocations.Where(path => !string.IsNullOrWhiteSpace(path)).Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (File.Exists(Path.Combine(location, "renpy.exe"))) roots.Add(Path.GetFullPath(location));
+            if (!Directory.Exists(location)) continue;
+            try
+            {
+                foreach (var directory in Directory.EnumerateDirectories(location, "renpy-*-sdk", SearchOption.TopDirectoryOnly))
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    roots.Add(Path.GetFullPath(directory));
+                }
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                // 某个常见目录不可访问时继续检查其余位置；用户指定路径仍会单独验证并返回。
+            }
+        }
+        return roots;
+    }
+
+    private static IReadOnlyDictionary<string, string?> CreateSdkEnvironment(SdkInstallation sdk)
+    {
+        var systemRoot = Environment.GetEnvironmentVariable("SYSTEMROOT") ?? Environment.GetEnvironmentVariable("windir");
+        var temporary = Path.GetTempPath().TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var sdkPath = string.Join(Path.PathSeparator,
+            new[] { sdk.RootPath, Path.Combine(sdk.RootPath, "lib", "py3-windows-x86_64") }
+                .Distinct(StringComparer.OrdinalIgnoreCase));
+        return new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["PYTHONUTF8"] = "1",
+            ["PYTHONNOUSERSITE"] = "1",
+            ["SYSTEMROOT"] = systemRoot,
+            ["windir"] = systemRoot,
+            ["TEMP"] = temporary,
+            ["TMP"] = temporary,
+            ["PATH"] = sdkPath
+        };
+    }
     private static Version ParseSdkVersion(string value)
     {
         var numeric = new string(value.TakeWhile(character => char.IsDigit(character) || character == '.').ToArray()).TrimEnd('.');

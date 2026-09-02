@@ -32,6 +32,41 @@ public sealed class ServiceContractTests
     }
 
     [Fact]
+    public async Task FileSystem_ExecutableValidation返回哈希并拒绝UNC()
+    {
+        using var project = new TemporaryProject();
+        var executable = Path.Combine(project.Root, "tool.exe");
+        await File.WriteAllBytesAsync(executable, [1, 2, 3]);
+        var service = new FileSystemService();
+
+        var valid = service.ValidateExecutable(executable);
+        var unc = service.ValidateExecutable("\\\\server\\share\\tool.exe");
+
+        Assert.True(valid.IsSuccess);
+        Assert.Matches("^[0-9A-F]{64}$", valid.Value!.Sha256);
+        Assert.Equal(OperationStatus.Failed, unc.Status);
+        Assert.Contains(unc.Diagnostics, diagnostic => diagnostic.Code == "EXECUTABLE_PATH_INVALID");
+    }
+
+    [Fact]
+    public async Task FileSystem_LimitedBinaryRead在分配前拒绝超限文件()
+    {
+        using var project = new TemporaryProject();
+        var service = new FileSystemService();
+        var root = service.ValidateProjectRoot(project.Root).Value!;
+        var relative = "game\\large.bin";
+        var full = Path.Combine(project.Root, relative);
+        Directory.CreateDirectory(Path.GetDirectoryName(full)!);
+        await File.WriteAllBytesAsync(full, new byte[32]);
+        var path = service.ValidateProjectPath(root, relative).Value!;
+
+        var result = await service.ReadBytesAsync(path, 16, CancellationToken.None);
+
+        Assert.Equal(OperationStatus.Failed, result.Status);
+        Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == "BINARY_FILE_TOO_LARGE");
+    }
+
+    [Fact]
     public async Task AtomicWrite_PreservesTargetAndCreatesBackup()
     {
         using var project = new TemporaryProject();

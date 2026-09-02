@@ -4,7 +4,7 @@ namespace RenPyLocalizationStudio.Core.Services;
 
 public sealed record ProjectRoot(string FullPath);
 public sealed record ValidatedProjectPath(ProjectRoot Root, string FullPath, string RelativePath);
-public sealed record ValidatedExecutablePath(string FullPath);
+public sealed record ValidatedExecutablePath(string FullPath, string Sha256 = "");
 public sealed record ValidatedToolPath(string FullPath, string Sha256 = "");
 public sealed record BinaryFileContent(byte[] Content, string Sha256);
 public sealed record AtomicWriteRequest(ValidatedProjectPath Target, byte[] Content, string? ExpectedSha256, string BackupSuffix = ".rls.bak", bool RequireTargetMissing = false);
@@ -20,6 +20,7 @@ public interface IFileSystemService
     OperationResult<ValidatedToolPath> ValidateToolPath(string path);
     Task<OperationResult<Utf8TextFile>> ReadUtf8Async(ValidatedProjectPath path, CancellationToken cancellationToken);
     Task<OperationResult<BinaryFileContent>> ReadBytesAsync(ValidatedProjectPath path, CancellationToken cancellationToken);
+    Task<OperationResult<BinaryFileContent>> ReadBytesAsync(ValidatedProjectPath path, long maximumBytes, CancellationToken cancellationToken);
     Task<OperationResult<bool>> ExistsAsync(ValidatedProjectPath path, CancellationToken cancellationToken);
     Task<OperationResult<AtomicWriteSummary>> AtomicWriteAsync(
         AtomicWriteRequest request,
@@ -101,9 +102,15 @@ public sealed class FileSystemService : IFileSystemService
         try
         {
             var full = Path.GetFullPath(path);
-            return File.Exists(full)
-                ? OperationResult<ValidatedExecutablePath>.Success(new ValidatedExecutablePath(full))
-                : OperationResult<ValidatedExecutablePath>.Failure(FileDiagnostic("EXECUTABLE_NOT_FOUND", "找不到可执行文件。", path));
+            if (full.StartsWith("\\\\", StringComparison.Ordinal) || IsDevicePath(full) || !File.Exists(full))
+                return OperationResult<ValidatedExecutablePath>.Failure(SecurityDiagnostic("EXECUTABLE_PATH_INVALID",
+                    "可执行文件不存在，或位于不允许的 UNC/设备路径。", path));
+            if (HasReparsePointInPath(full))
+                return OperationResult<ValidatedExecutablePath>.Failure(SecurityDiagnostic("EXECUTABLE_REPARSE_POINT",
+                    "可执行文件及其父目录不能经过符号链接或目录联接。", path));
+            using var stream = new FileStream(full, FileMode.Open, FileAccess.Read, FileShare.Read);
+            return OperationResult<ValidatedExecutablePath>.Success(
+                new ValidatedExecutablePath(full, Convert.ToHexString(SHA256.HashData(stream))));
         }
         catch (Exception ex) when (ex is ArgumentException or IOException or UnauthorizedAccessException or NotSupportedException)
         {
@@ -118,8 +125,7 @@ public sealed class FileSystemService : IFileSystemService
             var full = Path.GetFullPath(path);
             if (full.StartsWith("\\\\", StringComparison.Ordinal) || IsDevicePath(full) || !File.Exists(full))
                 return OperationResult<ValidatedToolPath>.Failure(SecurityDiagnostic("TOOL_PATH_INVALID", "工具文件不存在，或位于不允许的 UNC/设备路径。", path));
-            var info = new FileInfo(full);
-            if (info.Attributes.HasFlag(FileAttributes.ReparsePoint))
+            if (HasReparsePointInPath(full))
                 return OperationResult<ValidatedToolPath>.Failure(SecurityDiagnostic("TOOL_PATH_REPARSE_POINT", "工具文件不能是符号链接。", path));
             using var stream = new FileStream(full, FileMode.Open, FileAccess.Read, FileShare.Read);
             return OperationResult<ValidatedToolPath>.Success(new ValidatedToolPath(full, Convert.ToHexString(SHA256.HashData(stream))));
@@ -148,11 +154,20 @@ public sealed class FileSystemService : IFileSystemService
     }
 
     public async Task<OperationResult<BinaryFileContent>> ReadBytesAsync(ValidatedProjectPath path, CancellationToken cancellationToken)
+        => await ReadBytesAsync(path, long.MaxValue, cancellationToken).ConfigureAwait(false);
+
+    public async Task<OperationResult<BinaryFileContent>> ReadBytesAsync(
+        ValidatedProjectPath path,
+        long maximumBytes,
+        CancellationToken cancellationToken)
     {
         try
         {
             await using var stream = new FileStream(path.FullPath, FileMode.Open, FileAccess.Read, FileShare.Read, 65536,
                 FileOptions.Asynchronous | FileOptions.SequentialScan);
+            if (maximumBytes < 0 || stream.Length > maximumBytes)
+                return OperationResult<BinaryFileContent>.Failure(FileDiagnostic("BINARY_FILE_TOO_LARGE",
+                    $"文件大小 {stream.Length:N0} 字节超过允许上限 {maximumBytes:N0} 字节。", path.RelativePath));
             using var memory = new MemoryStream();
             await stream.CopyToAsync(memory, cancellationToken).ConfigureAwait(false);
             var content = memory.ToArray();
@@ -422,6 +437,13 @@ public sealed class FileSystemService : IFileSystemService
     }
 
     private static bool IsDevicePath(string path) => path.StartsWith("\\\\?\\", StringComparison.Ordinal) || path.StartsWith("\\\\.\\", StringComparison.Ordinal);
+    private static bool HasReparsePointInPath(string fullPath)
+    {
+        if (new FileInfo(fullPath).Attributes.HasFlag(FileAttributes.ReparsePoint)) return true;
+        for (var directory = Directory.GetParent(fullPath); directory is not null; directory = directory.Parent)
+            if (directory.Attributes.HasFlag(FileAttributes.ReparsePoint)) return true;
+        return false;
+    }
     private static async Task<string> ComputeHashAsync(string path, CancellationToken token)
     {
         await using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 65536, FileOptions.Asynchronous | FileOptions.SequentialScan);

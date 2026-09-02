@@ -1,8 +1,12 @@
 param(
-    [string]$SdkExe = 'E:\renpy-8.5.2-sdk\renpy.exe'
+    [string]$SdkExe = $env:RLS_RENPY_SDK
 )
 
 $ErrorActionPreference = 'Stop'
+$SdkExe = [string]$SdkExe
+if ([string]::IsNullOrWhiteSpace($SdkExe)) {
+    throw "请通过 -SdkExe 或 RLS_RENPY_SDK 指定 Ren'Py SDK 的 renpy.exe。"
+}
 $OutputEncoding = [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new()
 chcp 65001 > $null
 

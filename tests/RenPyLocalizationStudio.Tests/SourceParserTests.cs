@@ -6,6 +6,24 @@ namespace RenPyLocalizationStudio.Tests;
 public sealed class SourceParserTests
 {
     [Fact]
+    public void Parse_黄金夹具隔离三引号和Screen并保留动态跳转诊断()
+    {
+        var fixture = Path.Combine(AppContext.BaseDirectory, "TestData", "ParserEdgeCases.rpy");
+        var source = File.ReadAllText(fixture, Encoding.UTF8);
+
+        var document = new RenPySourceParser().Parse(TestFiles.InMemory(source), "game/ParserEdgeCases.rpy");
+
+        Assert.Contains("start", document.Graph.Labels.Keys);
+        Assert.Contains("finish", document.Graph.Labels.Keys);
+        Assert.DoesNotContain("fake_from_triple", document.Graph.Labels.Keys);
+        Assert.Single(document.ScreenRegions);
+        Assert.DoesNotContain(document.Graph.Nodes, node => node.OriginalText is "screen text" or "button");
+        Assert.Contains(document.Diagnostics, diagnostic => diagnostic.Code == "DYNAMIC_TRANSFER");
+        var dialogue = Assert.Single(document.Graph.Nodes, node => node.Kind == FlowNodeKind.Dialogue);
+        Assert.Equal("narrator happy", dialogue.Speaker);
+    }
+
+    [Fact]
     public void Parse_隔离Python和Screen并识别常用控制流()
     {
         const string source = """"
