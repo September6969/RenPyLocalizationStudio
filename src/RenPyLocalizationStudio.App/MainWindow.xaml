@@ -6,7 +6,11 @@
         WindowStyle="None" ResizeMode="CanResize" AllowsTransparency="False"
         Background="{DynamicResource BackgroundLevel0}" Foreground="{DynamicResource TextPrimaryBrush}"
         BorderThickness="1" BorderBrush="{DynamicResource BackgroundLevel1}"
-        FontFamily="{StaticResource StudioTextFontFamily}" TextOptions.TextFormattingMode="Display" UseLayoutRounding="True"
+        FontFamily="{StaticResource StudioUiFontFamily}"
+        TextOptions.TextFormattingMode="Display"
+        TextOptions.TextRenderingMode="ClearType"
+        TextOptions.TextHintingMode="Fixed"
+        UseLayoutRounding="True"
         SizeChanged="OnWindowSizeChanged" StateChanged="OnWindowStateChanged"
         Closing="OnWindowClosing" Closed="OnWindowClosed"
         PreviewKeyDown="OnWindowPreviewKeyDown">

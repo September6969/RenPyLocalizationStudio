@@ -88,9 +88,11 @@
                                 <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                                 <Border x:Name="AccentLine" Width="3" CornerRadius="1.5" Margin="0,2,12,2" Background="{Binding Accent}" Opacity="0.4" />
                                 <StackPanel Grid.Column="1" Margin="{Binding IndentMargin}" VerticalAlignment="Center">
-                                    <TextBlock x:Name="DialogueLine" TextWrapping="Wrap" Visibility="Collapsed" FontSize="13">
-                                        <Run Text="{Binding SpeakerPrefix, Mode=OneWay}" Foreground="{DynamicResource SpeakerTextBrush}" FontWeight="SemiBold" />
-                                        <Run Text="{Binding BodyText, Mode=OneWay}" Foreground="{DynamicResource DialogueTextBrush}" />
+                                    <TextBlock x:Name="DialogueLine" TextWrapping="Wrap" Visibility="Collapsed" FontSize="14">
+                                        <Run Text="{Binding SpeakerPrefix, Mode=OneWay}" Foreground="{DynamicResource SpeakerTextBrush}"
+                                             FontFamily="{StaticResource StudioUiFontFamily}" FontWeight="Medium" />
+                                        <Run Text="{Binding BodyText, Mode=OneWay}" Foreground="{DynamicResource DialogueTextBrush}"
+                                             FontFamily="{StaticResource StudioReadingFontFamily}" FontWeight="Normal" />
                                     </TextBlock>
                                     <TextBlock x:Name="StructureLine" Text="{Binding BodyText}" FontWeight="SemiBold" FontSize="13"
                                                Foreground="{DynamicResource DialogueTextBrush}" TextWrapping="Wrap" />

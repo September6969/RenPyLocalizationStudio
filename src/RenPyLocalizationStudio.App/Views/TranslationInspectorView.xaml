@@ -68,7 +68,7 @@
                 <Border Grid.Row="6" Background="{DynamicResource BackgroundLevel0}" BorderBrush="{DynamicResource BackgroundLevel1}" BorderThickness="1" CornerRadius="4" Padding="8,6">
                     <avalonEdit:TextEditor WordWrap="True" ShowLineNumbers="False"
                                            Background="Transparent" Foreground="{DynamicResource DialogueTextBrush}"
-                                           FontFamily="Cascadia Code, Microsoft YaHei UI" FontSize="14"
+                                           FontFamily="{StaticResource StudioReadingFontFamily}" FontSize="15"
                                            behaviors:AvalonEditBindingBehavior.BindableText="{Binding TranslationText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                                            behaviors:AvalonEditBindingBehavior.DocumentKey="{Binding DocumentKey}"
                                            behaviors:AvalonEditBindingBehavior.IsReadOnly="{Binding IsReadOnly}"
