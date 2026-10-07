@@ -53,20 +53,28 @@
                                            behaviors:AvalonEditBindingBehavior.DocumentKey="{Binding DocumentKey}" />
                 </Border>
                 
-                <ItemsControl Grid.Row="4" ItemsSource="{Binding PlaceholderTokens}" Margin="0,8">
+                <ItemsControl Grid.Row="4" ItemsSource="{Binding PlaceholderTokens}" Margin="0,8" Tag="{Binding ElementName=TranslationEditor}">
                     <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
                     <ItemsControl.ItemTemplate>
                         <DataTemplate>
-                            <Border Background="{DynamicResource BrandAccentSoftBrush}" CornerRadius="4" Padding="6,2" Margin="0,0,6,4">
+                            <Button Click="Placeholder_Click" Focusable="False"
+                                    Tag="{Binding Tag, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                    Padding="6,3" Margin="0,0,4,4" ToolTip="在译文光标处插入；选中文字时替换选区，可用 Ctrl+Z 撤销"
+                                    AutomationProperties.Name="{Binding}">
+                                <Button.Style><Style TargetType="Button" BasedOn="{StaticResource GhostButtonStyle}">
+                                    <Style.Triggers><DataTrigger Binding="{Binding DataContext.IsReadOnly, RelativeSource={RelativeSource AncestorType=ItemsControl}}" Value="True">
+                                        <Setter Property="IsEnabled" Value="False" />
+                                    </DataTrigger></Style.Triggers>
+                                </Style></Button.Style>
                                 <TextBlock Text="{Binding}" Foreground="{DynamicResource BrandAccentBrush}" FontFamily="Cascadia Code, Consolas" FontSize="11" />
-                            </Border>
+                            </Button>
                         </DataTemplate>
                     </ItemsControl.ItemTemplate>
                 </ItemsControl>
                 
-                <TextBlock Grid.Row="5" Text="译文" FontSize="11" FontWeight="Medium" Foreground="{DynamicResource TextMutedBrush}" Margin="0,8,0,4" />
+                <TextBlock Grid.Row="5" Text="译文  ·  Ctrl+S 保存 / Alt+↑↓ 切换" TextWrapping="Wrap" FontSize="11" FontWeight="Medium" Foreground="{DynamicResource TextMutedBrush}" Margin="0,8,0,4" />
                 <Border Grid.Row="6" Background="{DynamicResource BackgroundLevel0}" BorderBrush="{DynamicResource BackgroundLevel1}" BorderThickness="1" CornerRadius="4" Padding="8,6">
-                    <avalonEdit:TextEditor WordWrap="True" ShowLineNumbers="False"
+                    <avalonEdit:TextEditor x:Name="TranslationEditor" WordWrap="True" ShowLineNumbers="False"
                                            Background="Transparent" Foreground="{DynamicResource DialogueTextBrush}"
                                            FontFamily="{StaticResource StudioReadingFontFamily}" FontSize="15"
                                            behaviors:AvalonEditBindingBehavior.BindableText="{Binding TranslationText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
@@ -76,6 +84,28 @@
                 </Border>
                 
                 <StackPanel Grid.Row="7" Margin="0,8,0,0">
+                    <Expander Header="{Binding SuggestionsHeading}" Foreground="{DynamicResource TextSubtleBrush}" Margin="0,0,0,8"
+                              Visibility="{Binding HasSuggestions, Converter={StaticResource BooleanToVisibilityConverter}}">
+                        <ScrollViewer MaxHeight="160" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                            <ItemsControl ItemsSource="{Binding Suggestions}" Tag="{Binding ElementName=TranslationEditor}">
+                                <ItemsControl.ItemTemplate><DataTemplate>
+                                    <Button Click="Suggestion_Click" Focusable="False" HorizontalContentAlignment="Stretch" Padding="8,6" Margin="0,3,0,0"
+                                            Tag="{Binding Tag, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                            ToolTip="采用此译文，替换当前内容；可用 Ctrl+Z 撤销。请先核对语境。" AutomationProperties.Name="采用项目内已有译文">
+                                        <Button.Style><Style TargetType="Button" BasedOn="{StaticResource GhostButtonStyle}">
+                                            <Style.Triggers><DataTrigger Binding="{Binding DataContext.IsReadOnly, RelativeSource={RelativeSource AncestorType=ItemsControl}}" Value="True">
+                                                <Setter Property="IsEnabled" Value="False" />
+                                            </DataTrigger></Style.Triggers>
+                                        </Style></Button.Style>
+                                        <StackPanel>
+                                            <TextBlock Text="{Binding Translation}" TextWrapping="Wrap" Foreground="{DynamicResource DialogueTextBrush}" />
+                                            <TextBlock Text="{Binding Description}" TextWrapping="Wrap" FontSize="10" Margin="0,4,0,0" Foreground="{DynamicResource TextMutedBrush}" />
+                                        </StackPanel>
+                                    </Button>
+                                </DataTemplate></ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </ScrollViewer>
+                    </Expander>
                     <TextBlock Text="{Binding Impact}" Foreground="{DynamicResource BrandAccentBrush}" FontSize="12" TextWrapping="Wrap" />
                     <TextBlock Text="{Binding ValidationMessage}" Foreground="{DynamicResource SemanticErrorBrush}" FontSize="12" TextWrapping="Wrap" Margin="0,4,0,0" />
                     <Button Content="统一冲突译文" Command="{Binding UnifyConflictCommand}" Style="{StaticResource GhostButtonStyle}"

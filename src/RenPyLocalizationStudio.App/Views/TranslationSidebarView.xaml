@@ -9,13 +9,11 @@
             <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/>
         </Grid.RowDefinitions>
         <TextBlock Text="项目导航" FontSize="15" FontWeight="SemiBold" />
-        <TextBlock Grid.Row="1" Text="搜索、分组与 Label 定位" Margin="0,4,0,10" FontSize="11" Foreground="{DynamicResource TextMutedBrush}" />
-        <TextBox Grid.Row="2" Text="{Binding Workspace.SearchText, UpdateSourceTrigger=PropertyChanged, Delay=180}" ToolTip="搜索 label、原文、译文或路径"
-                 AutomationProperties.Name="搜索剧情流" />
+        <TextBlock Grid.Row="1" Text="视图、分组与 Label 定位" Margin="0,4,0,10" FontSize="11" Foreground="{DynamicResource TextMutedBrush}" />
         <ListBox Grid.Row="3" ItemsSource="{Binding Workspace.ViewModes}" SelectedItem="{Binding Workspace.ViewMode, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                  Margin="0,8,0,0" Background="Transparent" BorderThickness="0" ItemContainerStyle="{StaticResource SidebarTabItemStyle}"
                  ScrollViewer.HorizontalScrollBarVisibility="Disabled" ScrollViewer.VerticalScrollBarVisibility="Disabled">
-            <ListBox.ItemsPanel><ItemsPanelTemplate><StackPanel Orientation="Horizontal" /></ItemsPanelTemplate></ListBox.ItemsPanel>
+            <ListBox.ItemsPanel><ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate></ListBox.ItemsPanel>
             <ListBox.ItemTemplate>
                 <DataTemplate>
                     <TextBlock>
@@ -27,6 +25,7 @@
                                     <DataTrigger Binding="{Binding}" Value="{x:Static vm:TranslationViewMode.Strings}"><Setter Property="Text" Value="字符串表" /></DataTrigger>
                                     <DataTrigger Binding="{Binding}" Value="{x:Static vm:TranslationViewMode.Unbound}"><Setter Property="Text" Value="未绑定" /></DataTrigger>
                                     <DataTrigger Binding="{Binding}" Value="{x:Static vm:TranslationViewMode.Bookmarks}"><Setter Property="Text" Value="书签" /></DataTrigger>
+                                    <DataTrigger Binding="{Binding}" Value="{x:Static vm:TranslationViewMode.Quality}"><Setter Property="Text" Value="质量检查" /></DataTrigger>
                                 </Style.Triggers>
                             </Style>
                         </TextBlock.Style>
@@ -45,7 +44,7 @@
                     </Style.Triggers>
                 </Style>
             </ListBox.Style>
-            <ListBox.ItemsPanel><ItemsPanelTemplate><StackPanel Orientation="Horizontal" /></ItemsPanelTemplate></ListBox.ItemsPanel>
+            <ListBox.ItemsPanel><ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate></ListBox.ItemsPanel>
             <ListBox.ItemTemplate>
                 <DataTemplate>
                     <TextBlock>

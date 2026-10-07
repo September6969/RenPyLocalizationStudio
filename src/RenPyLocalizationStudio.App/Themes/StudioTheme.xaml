@@ -234,7 +234,7 @@
                     <Grid>
                         <ToggleButton x:Name="DropDownToggle" Focusable="False" ClickMode="Press"
                                       IsChecked="{Binding IsDropDownOpen, RelativeSource={RelativeSource TemplatedParent}, Mode=TwoWay}"
-                                      Background="{TemplateBinding Background}" BorderThickness="0">
+                                      Background="{TemplateBinding Background}" Foreground="{TemplateBinding Foreground}" BorderThickness="0">
                             <ToggleButton.Template>
                                 <ControlTemplate TargetType="ToggleButton">
                                     <Border x:Name="Bg" Background="{TemplateBinding Background}" CornerRadius="4">
@@ -252,7 +252,10 @@
                                     <ColumnDefinition Width="*" />
                                     <ColumnDefinition Width="28" />
                                 </Grid.ColumnDefinitions>
-                                <ContentPresenter Margin="{TemplateBinding Padding}" HorizontalAlignment="Left" VerticalAlignment="Center" Content="{TemplateBinding SelectionBoxItem}"/>
+                                <ContentPresenter Margin="{TemplateBinding Padding}" HorizontalAlignment="Left" VerticalAlignment="Center" Content="{TemplateBinding SelectionBoxItem}"
+                                                  ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}"
+                                                  ContentTemplateSelector="{TemplateBinding ItemTemplateSelector}"
+                                                  ContentStringFormat="{TemplateBinding SelectionBoxItemStringFormat}"/>
                                 <TextBlock Grid.Column="1" Text="&#xE70D;" FontFamily="Segoe MDL2 Assets" FontSize="10" HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="{DynamicResource TextMutedBrush}"/>
                             </Grid>
                         </ToggleButton>

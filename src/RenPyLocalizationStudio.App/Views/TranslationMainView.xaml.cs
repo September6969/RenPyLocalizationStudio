@@ -8,7 +8,51 @@ namespace RenPyLocalizationStudio.App.Views;
 
 public partial class TranslationMainView : UserControl
 {
+    private GridLength _expandedPreviewHeight = new(2, GridUnitType.Star);
+    private GridLength _expandedFlowHeight = new(3, GridUnitType.Star);
+    private bool _previewCollapsed;
+
     public TranslationMainView() => InitializeComponent();
+
+    internal void FocusSearch()
+    {
+        SearchBox.Focus();
+        SearchBox.SelectAll();
+    }
+
+    private void SearchBox_PreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key != Key.Escape || DataContext is not TranslationMainContentViewModel viewModel) return;
+        // 清除延迟绑定中的输入，避免旧关键词稍后重新出现。
+        SearchBox.SetCurrentValue(TextBox.TextProperty, string.Empty);
+        SearchBox.GetBindingExpression(TextBox.TextProperty)?.UpdateSource();
+        viewModel.Workspace.SearchText = string.Empty;
+        e.Handled = true;
+    }
+
+    private void PreviewCollapse_Changed(object sender, RoutedEventArgs e)
+    {
+        var collapsed = PreviewCollapseToggle.IsChecked == true;
+        if (_previewCollapsed == collapsed) return;
+        _previewCollapsed = collapsed;
+        if (collapsed)
+        {
+            // 保留用户拖动后的分栏比例，展开时恢复。
+            _expandedPreviewHeight = PreviewRow.Height;
+            _expandedFlowHeight = FlowRow.Height;
+            PreviewRow.MinHeight = 36;
+            PreviewRow.Height = new GridLength(36);
+            FlowRow.Height = new GridLength(1, GridUnitType.Star);
+            PreviewSplitter.Visibility = Visibility.Collapsed;
+        }
+        else
+        {
+            PreviewRow.MinHeight = 110;
+            PreviewRow.Height = _expandedPreviewHeight;
+            FlowRow.Height = _expandedFlowHeight;
+            PreviewSplitter.Visibility = Visibility.Visible;
+        }
+    }
 
     private void FlowList_PreviewMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
     {

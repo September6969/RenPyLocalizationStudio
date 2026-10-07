@@ -352,6 +352,9 @@ public sealed class ProjectSessionViewModel : ObservableObject
         var errors = result.Diagnostics.Where(x => x.Severity == DiagnosticSeverity.Error).ToArray();
         if (!result.IsSuccess || errors.Length > 0)
         {
+            // 部分文件已提交时，也要让筛选与脏状态反映实际落盘结果。
+            if (result.Value?.Files.Any(file => file.Status == SaveFileStatus.Saved) == true)
+                SaveCompleted?.Invoke(this, EventArgs.Empty);
             if (result.Status != OperationStatus.Cancelled && showDiagnostics)
             {
                 var diagnostics = result.Diagnostics.Count > 0

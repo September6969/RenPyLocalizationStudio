@@ -21,7 +21,7 @@ public partial class MainWindow : Window
     private readonly MainViewModel _viewModel;
     private HwndSource? _source;
     private bool? _sidebarExpanded;
-    private bool? _inspectorExpanded;
+    private double? _inspectorWidth;
     private bool _shutdownInProgress;
     private bool _shutdownComplete;
 
@@ -43,6 +43,7 @@ public partial class MainWindow : Window
 
     private void OnWorkspaceChanged()
     {
+        UpdateResponsiveLayout(ActualWidth);
         if (!IsLoaded) return;
         AnimateSlideIn(SidebarHost, fromX: -16, fromY: 0);
         AnimateSlideIn(MainHost, fromX: 0, fromY: 10);
@@ -234,15 +235,19 @@ public partial class MainWindow : Window
         }
     }
 
+    private void InspectorHost_IsVisibleChanged(object sender, DependencyPropertyChangedEventArgs e)
+        => UpdateResponsiveLayout(ActualWidth);
+
     private void OnWindowSizeChanged(object sender, SizeChangedEventArgs e) => UpdateResponsiveLayout(e.NewSize.Width);
 
     private void UpdateResponsiveLayout(double width)
     {
         if (!IsInitialized) return;
-        var showSidebar = width >= 900;
-        var showInspector = width >= 1180;
-        double targetSidebarWidth = showSidebar ? 260 : 0;
-        double targetInspectorWidth = showInspector ? 360 : 0;
+        var layout = WorkspacePaneLayout.Calculate(width, _viewModel.CurrentWorkspace?.IsInspectorVisible == true);
+        var showSidebar = layout.SidebarWidth > 0;
+        var showInspector = layout.InspectorWidth > 0;
+        var targetSidebarWidth = layout.SidebarWidth;
+        var targetInspectorWidth = layout.InspectorWidth;
 
         if (_sidebarExpanded != showSidebar)
         {
@@ -250,9 +255,9 @@ public partial class MainWindow : Window
             if (IsLoaded) AnimateWidth(SidebarHost, targetSidebarWidth);
             else SidebarHost.Width = targetSidebarWidth;
         }
-        if (_inspectorExpanded != showInspector)
+        if (_inspectorWidth != targetInspectorWidth)
         {
-            _inspectorExpanded = showInspector;
+            _inspectorWidth = targetInspectorWidth;
             if (IsLoaded) AnimateWidth(InspectorHost, targetInspectorWidth);
             else InspectorHost.Width = targetInspectorWidth;
         }
@@ -299,6 +304,12 @@ public partial class MainWindow : Window
 
     private void OnWindowPreviewKeyDown(object sender, KeyEventArgs e)
     {
+        if (HandleTranslationShortcut(e.Key, Keyboard.Modifiers))
+        {
+            e.Handled = true;
+            return;
+        }
+
         // Alt+←/→ 保留给文本编辑器的单词移动；在编辑器之外拦截，避免被误当成窗口/历史导航。
         var pressedKey = e.Key == Key.System ? e.SystemKey : e.Key;
         if (Keyboard.Modifiers.HasFlag(ModifierKeys.Alt) &&
@@ -313,6 +324,35 @@ public partial class MainWindow : Window
         var point = PointToScreen(new Point(0, 40));
         SystemCommands.ShowSystemMenu(this, point);
         e.Handled = true;
+    }
+
+    internal bool HandleTranslationShortcut(Key key, ModifierKeys modifiers)
+    {
+        // 只作用于翻译工作区，避免在补丁文档中误保存另一类内容。
+        if (_viewModel.CurrentWorkspace != _viewModel.TranslationWorkspace) return false;
+        if (modifiers == ModifierKeys.Control && key == Key.F)
+        {
+            FindVisualChild<Views.TranslationMainView>(MainHost)?.FocusSearch();
+            return true;
+        }
+        ICommand? command = modifiers == ModifierKeys.Control && key == Key.S
+            ? _viewModel.Session.SaveCommand
+            : modifiers == ModifierKeys.None && key == Key.F8
+                ? _viewModel.TranslationWorkspace.MoveNextPendingCommand : null;
+        if (command is null) return false;
+        if (command.CanExecute(null)) command.Execute(null);
+        return true;
+    }
+
+    private static T? FindVisualChild<T>(DependencyObject parent) where T : DependencyObject
+    {
+        for (var index = 0; index < VisualTreeHelper.GetChildrenCount(parent); index++)
+        {
+            var child = VisualTreeHelper.GetChild(parent, index);
+            if (child is T match) return match;
+            if (FindVisualChild<T>(child) is { } descendant) return descendant;
+        }
+        return null;
     }
 
     private static bool IsTextEditorFocused(DependencyObject? source)
