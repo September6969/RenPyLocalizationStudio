@@ -33,6 +33,16 @@ public sealed class ProjectSessionViewModel : ObservableObject
     private string? _lastTranslationGroupingMode;
     private string? _lastTranslationProjectPath;
     private string? _lastTranslationLanguage;
+    private readonly Dictionary<string, TranslationWorkspaceState> _workspaceStates = new(StringComparer.Ordinal);
+    public TranslationWorkspaceState? GetWorkspaceState(string project, string language) =>
+        _workspaceStates.GetValueOrDefault(WorkspaceStateIdentity.Key(project, language));
+    public void RememberWorkspaceState(TranslationWorkspaceState state) =>
+        _workspaceStates[WorkspaceStateIdentity.Key(state.ProjectPath, state.Language)] = state;
+    public void AdoptComparedSnapshot(ProjectSnapshot snapshot)
+    {
+        if (Tasks.IsBusy || !IsSnapshotForScope(snapshot, ProjectPath, Language)) throw new InvalidOperationException("项目已变化，请重新对比。");
+        Snapshot = snapshot;
+    }
     private ProjectSnapshot? _snapshot;
     private long _languageRequestVersion;
     private long _scopeVersion;
@@ -79,6 +89,7 @@ public sealed class ProjectSessionViewModel : ObservableObject
     public IAsyncRelayCommand ForceSaveCommand { get; }
     public event EventHandler<ProjectSnapshot?>? SnapshotChanged;
     public event EventHandler? SaveCompleted;
+    public bool IsReloadingAfterSave { get; private set; }
 
     /// <summary>控制译文停止输入后是否自动写入项目。</summary>
     public bool AutoSaveEnabled
@@ -172,6 +183,22 @@ public sealed class ProjectSessionViewModel : ObservableObject
         _lastTranslationGroupingMode = saved.LastTranslationGroupingMode;
         _lastTranslationProjectPath = saved.LastProject;
         _lastTranslationLanguage = saved.LastLanguage;
+        foreach (var state in saved.TranslationWorkspaces ?? [])
+        {
+            if (state is null || string.IsNullOrWhiteSpace(state.ProjectPath) || string.IsNullOrWhiteSpace(state.Language)) continue;
+            try { RememberWorkspaceState(state); }
+            catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException) { }
+        }
+        if (!string.IsNullOrWhiteSpace(saved.LastProject) && !string.IsNullOrWhiteSpace(saved.LastLanguage))
+        {
+            try
+            {
+                if (GetWorkspaceState(saved.LastProject, saved.LastLanguage) is null)
+                    RememberWorkspaceState(new(saved.LastProject, saved.LastLanguage, saved.LastTranslationItemId,
+                        saved.LastTranslationViewMode ?? "Flow", saved.LastTranslationGroupingMode ?? "StoryPath"));
+            }
+            catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException) { }
+        }
         // 项目路径验证统一交给目录发现服务；这里不直接访问磁盘，避免绕过文件系统 seam。
         if (!string.IsNullOrWhiteSpace(saved.LastProject))
         {
@@ -294,7 +321,7 @@ public sealed class ProjectSessionViewModel : ObservableObject
                 AutoSaveEnabled,
                 positionIsCurrent ? _lastTranslationItemId : null,
                 positionIsCurrent ? _lastTranslationViewMode : null,
-                positionIsCurrent ? _lastTranslationGroupingMode : null), cancellationToken);
+                positionIsCurrent ? _lastTranslationGroupingMode : null, _workspaceStates.Values.ToArray()), cancellationToken);
             return true;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -380,7 +407,12 @@ public sealed class ProjectSessionViewModel : ObservableObject
             ? $"已{(forceOverwrite ? "强制覆盖" : "安全")}保存 {result.Value?.SavedFiles ?? 0} 个文件；正在重新加载。"
             : $"自动保存完成：{result.Value?.SavedFiles ?? 0} 个文件。";
         SaveCompleted?.Invoke(this, EventArgs.Empty);
-        if (reloadAfterSave) await AnalyzeCoreAsync(cancellationToken);
+        if (reloadAfterSave)
+        {
+            IsReloadingAfterSave = true;
+            try { await AnalyzeCoreAsync(cancellationToken); }
+            finally { IsReloadingAfterSave = false; }
+        }
         return true;
     }
 

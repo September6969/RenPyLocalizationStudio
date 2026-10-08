@@ -64,7 +64,7 @@
                     </StackPanel>
                 </WrapPanel>
                 <Grid Grid.Row="1" Margin="0,8,0,0">
-                    <TextBox x:Name="SearchBox" Text="{Binding Workspace.SearchText, UpdateSourceTrigger=PropertyChanged, Delay=180}"
+                    <TextBox x:Name="SearchBox" Text="{Binding Workspace.SearchText, UpdateSourceTrigger=PropertyChanged}"
                              PreviewKeyDown="SearchBox_PreviewKeyDown" Padding="8,5"
                              ToolTip="Ctrl+F 搜索；Esc 清除关键词" AutomationProperties.Name="搜索剧情流" />
                     <TextBlock Text="搜索原文、译文、Label 或路径  ·  Ctrl+F" IsHitTestVisible="False" Margin="9,0"
@@ -79,6 +79,11 @@
                     </TextBlock>
                 </Grid>
                 <WrapPanel Grid.Row="2" Margin="0,6,0,0">
+                    <ComboBox Width="100" ItemsSource="{Binding Workspace.SearchFields}" DisplayMemberPath="Label" SelectedValuePath="Value" SelectedValue="{Binding Workspace.SearchField}" Margin="0,0,6,4"/>
+                    <CheckBox Content="区分大小写" IsChecked="{Binding Workspace.SearchCaseSensitive}" Margin="0,0,8,4"/>
+                    <CheckBox Content="正则" IsChecked="{Binding Workspace.SearchRegex}" Margin="0,0,8,4"/>
+                    <ComboBox Width="120" ItemsSource="{Binding Workspace.ReviewFilters}" DisplayMemberPath="Label" SelectedValuePath="Value" SelectedValue="{Binding Workspace.ReviewFilter}" Margin="0,0,6,4"/>
+
                     <ComboBox Width="110" ItemsSource="{Binding Workspace.StatusFilters}" DisplayMemberPath="Label" SelectedValuePath="Value"
                               SelectedValue="{Binding Workspace.StatusFilter, Mode=TwoWay}" ToolTip="已修改表示尚未保存的编辑；已译仅表示非空且无共享冲突，仍可能存在质量问题。" AutomationProperties.Name="译文状态筛选" Margin="0,0,6,4" />
                     <ComboBox Width="210" ItemsSource="{Binding Workspace.ProgressScopes}" DisplayMemberPath="Label" SelectedValuePath="Id"
@@ -87,6 +92,12 @@
                     </ComboBox>
                 </WrapPanel>
                 <StackPanel Grid.Row="4" Margin="0,5,0,0">
+                    <TextBlock Text="{Binding Workspace.SearchError}" TextWrapping="Wrap" Foreground="{DynamicResource SemanticWarningBrush}"/>
+                    <TextBlock Text="{Binding Workspace.RecoveryMessage}" TextWrapping="Wrap" Visibility="{Binding Workspace.HasRecoveryMessage, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                    <WrapPanel Visibility="{Binding Workspace.IsComputing, Converter={StaticResource BooleanToVisibilityConverter}}">
+                        <TextBlock Text="正在计算，完成后更新结果…" VerticalAlignment="Center"/>
+                        <Button Content="取消计算" Command="{Binding Workspace.CancelResultsCommand}" Style="{StaticResource GhostButtonStyle}" />
+                    </WrapPanel>
                     <TextBlock Text="{Binding Workspace.QualitySummary}" TextWrapping="Wrap" FontSize="11" Foreground="{DynamicResource TextMutedBrush}"
                                Visibility="{Binding Workspace.IsQualityView, Converter={StaticResource BooleanToVisibilityConverter}}" />
                     <TextBlock Text="译文已变化，点击「刷新结果」更新列表。当前条目保留，方便继续编辑。" TextWrapping="Wrap" FontSize="11"
@@ -95,6 +106,11 @@
                 <WrapPanel Grid.Row="3" Margin="0,6,0,0" VerticalAlignment="Center">
                     <Button Content="下一条待译" Command="{Binding Workspace.MoveNextPendingCommand}" Style="{StaticResource GhostButtonStyle}" Padding="12,6" Margin="0,0,8,0" ToolTip="F8 · 在当前列表中循环查找空译文或冲突译文，并聚焦编辑器" />
                     <Button Content="刷新结果" Command="{Binding Workspace.RefreshResultsCommand}" Style="{StaticResource GhostButtonStyle}" Padding="12,6" />
+                    <Button Content="批量复用" Click="Bulk_Click" IsEnabled="{Binding Workspace.CanOpenBulk}" Style="{StaticResource GhostButtonStyle}" Padding="12,6" />
+                    <Button Content="术语与校对" Click="Editorial_Click" Tag="0" IsEnabled="{Binding Workspace.CanOpenBulk}" Style="{StaticResource GhostButtonStyle}" Padding="12,6"/>
+                    <Button Content="查找替换 / 回填 / 迁移" Click="Editorial_Click" Tag="2" IsEnabled="{Binding Workspace.CanOpenBulk}" Style="{StaticResource GhostButtonStyle}" Padding="12,6"/>
+                    <Button Content="外部修改对比" Click="Editorial_Click" Tag="3" IsEnabled="{Binding Workspace.CanOpenBulk}" Style="{StaticResource GhostButtonStyle}" Padding="12,6"/>
+                    <Button Content="撤销批量编辑" Command="{Binding Workspace.UndoBulkCommand}" Style="{StaticResource GhostButtonStyle}" Padding="12,6" />
                     <Button Content="清除筛选" Command="{Binding Workspace.ClearSearchCommand}" Style="{StaticResource GhostButtonStyle}" Padding="12,6" />
                     <Button Content="定位原代码" Command="{Binding Workspace.NavigateBookmarkCommand}"
                             CommandParameter="{Binding Workspace.SelectedItem}" Style="{StaticResource GhostButtonStyle}"
@@ -221,7 +237,12 @@
                 <TextBlock Text="{Binding Workspace.EmptyStateTitle}" FontSize="16" FontWeight="SemiBold" TextAlignment="Center" TextWrapping="Wrap" />
                 <TextBlock Text="{Binding Workspace.EmptyStateHint}" Foreground="{DynamicResource TextMutedBrush}"
                            Margin="0,8,0,12" TextAlignment="Center" TextWrapping="Wrap" />
-                <Button Content="清除筛选" Command="{Binding Workspace.ClearSearchCommand}"
+                <Button Content="批量复用" Click="Bulk_Click" IsEnabled="{Binding Workspace.CanOpenBulk}" Style="{StaticResource GhostButtonStyle}" Padding="12,6" />
+                    <Button Content="术语与校对" Click="Editorial_Click" Tag="0" IsEnabled="{Binding Workspace.CanOpenBulk}" Style="{StaticResource GhostButtonStyle}" Padding="12,6"/>
+                    <Button Content="查找替换 / 回填 / 迁移" Click="Editorial_Click" Tag="2" IsEnabled="{Binding Workspace.CanOpenBulk}" Style="{StaticResource GhostButtonStyle}" Padding="12,6"/>
+                    <Button Content="外部修改对比" Click="Editorial_Click" Tag="3" IsEnabled="{Binding Workspace.CanOpenBulk}" Style="{StaticResource GhostButtonStyle}" Padding="12,6"/>
+                    <Button Content="撤销批量编辑" Command="{Binding Workspace.UndoBulkCommand}" Style="{StaticResource GhostButtonStyle}" Padding="12,6" />
+                    <Button Content="清除筛选" Command="{Binding Workspace.ClearSearchCommand}"
                         HorizontalAlignment="Center" Style="{StaticResource GhostButtonStyle}" Padding="12,6"
                         Visibility="{Binding Workspace.HasActiveFilters, Converter={StaticResource BooleanToVisibilityConverter}}" />
             </StackPanel>

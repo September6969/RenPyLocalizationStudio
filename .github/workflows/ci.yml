@@ -5,7 +5,7 @@ on:
     branches: [main]
     tags: ['v*']
   pull_request:
-    branches: [main]
+    branches: [main, 'ux/**']
 
 jobs:
   windows:
@@ -82,7 +82,7 @@ jobs:
         env:
           RLS_TOOL_CACHE: ${{ github.workspace }}\.ci\tool-downloads
         run: |
-          ./scripts/verify-tool-manifest.ps1 -RootPath ./artifacts/win-x64-self-contained
+          ./scripts/verify-tool-manifest.ps1 -ToolsDirectory ./artifacts/win-x64-self-contained/tools
           $archive = Get-ChildItem artifacts/release/*-self-contained.zip | Select-Object -First 1
           $first = (Get-FileHash -LiteralPath $archive.FullName -Algorithm SHA256).Hash
           ./scripts/publish.ps1 -SelfContained -Package

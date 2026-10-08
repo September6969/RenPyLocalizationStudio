@@ -1,0 +1,242 @@
+[
+  {
+    "Count": 10000,
+    "Operation": "search",
+    "TotalMs": 219.5034,
+    "UiGapMs": 18.0798
+  },
+  {
+    "Count": 10000,
+    "Operation": "scope",
+    "TotalMs": 1.4065,
+    "UiGapMs": 1.3909
+  },
+  {
+    "Count": 10000,
+    "Operation": "quality",
+    "TotalMs": 45.0729,
+    "UiGapMs": 16.189199999999996
+  },
+  {
+    "Count": 10000,
+    "Operation": "bulk",
+    "TotalMs": 16.9675,
+    "UiGapMs": 10.340300000000001
+  },
+  {
+    "Count": 10000,
+    "Operation": "search",
+    "TotalMs": 213.2635,
+    "UiGapMs": 17.248500000000007
+  },
+  {
+    "Count": 10000,
+    "Operation": "scope",
+    "TotalMs": 1.2251,
+    "UiGapMs": 1.1871
+  },
+  {
+    "Count": 10000,
+    "Operation": "quality",
+    "TotalMs": 74.0098,
+    "UiGapMs": 17.477399999999996
+  },
+  {
+    "Count": 10000,
+    "Operation": "bulk",
+    "TotalMs": 14.0405,
+    "UiGapMs": 11.774
+  },
+  {
+    "Count": 10000,
+    "Operation": "search",
+    "TotalMs": 212.3756,
+    "UiGapMs": 18.517899999999997
+  },
+  {
+    "Count": 10000,
+    "Operation": "scope",
+    "TotalMs": 2.5604,
+    "UiGapMs": 2.5343
+  },
+  {
+    "Count": 10000,
+    "Operation": "quality",
+    "TotalMs": 48.2827,
+    "UiGapMs": 15.6828
+  },
+  {
+    "Count": 10000,
+    "Operation": "bulk",
+    "TotalMs": 16.5319,
+    "UiGapMs": 12.9175
+  },
+  {
+    "Count": 10000,
+    "Operation": "search",
+    "TotalMs": 218.1835,
+    "UiGapMs": 32.576
+  },
+  {
+    "Count": 10000,
+    "Operation": "scope",
+    "TotalMs": 2.5385,
+    "UiGapMs": 2.5033
+  },
+  {
+    "Count": 10000,
+    "Operation": "quality",
+    "TotalMs": 79.1853,
+    "UiGapMs": 26.1818
+  },
+  {
+    "Count": 10000,
+    "Operation": "bulk",
+    "TotalMs": 17.5355,
+    "UiGapMs": 16.1177
+  },
+  {
+    "Count": 10000,
+    "Operation": "search",
+    "TotalMs": 205.0495,
+    "UiGapMs": 17.613199999999992
+  },
+  {
+    "Count": 10000,
+    "Operation": "scope",
+    "TotalMs": 2.4556,
+    "UiGapMs": 2.4267999999999996
+  },
+  {
+    "Count": 10000,
+    "Operation": "quality",
+    "TotalMs": 55.3103,
+    "UiGapMs": 26.9285
+  },
+  {
+    "Count": 10000,
+    "Operation": "bulk",
+    "TotalMs": 28.7723,
+    "UiGapMs": 19.4569
+  },
+  {
+    "Count": 50000,
+    "Operation": "search",
+    "TotalMs": 213.4951,
+    "UiGapMs": 32.463800000000006
+  },
+  {
+    "Count": 50000,
+    "Operation": "scope",
+    "TotalMs": 7.2441,
+    "UiGapMs": 7.228
+  },
+  {
+    "Count": 50000,
+    "Operation": "quality",
+    "TotalMs": 240.1369,
+    "UiGapMs": 37.022299999999994
+  },
+  {
+    "Count": 50000,
+    "Operation": "bulk",
+    "TotalMs": 129.8255,
+    "UiGapMs": 34.1528
+  },
+  {
+    "Count": 50000,
+    "Operation": "search",
+    "TotalMs": 219.947,
+    "UiGapMs": 32.781099999999995
+  },
+  {
+    "Count": 50000,
+    "Operation": "scope",
+    "TotalMs": 11.8459,
+    "UiGapMs": 11.8289
+  },
+  {
+    "Count": 50000,
+    "Operation": "quality",
+    "TotalMs": 215.5164,
+    "UiGapMs": 34.3837
+  },
+  {
+    "Count": 50000,
+    "Operation": "bulk",
+    "TotalMs": 150.3233,
+    "UiGapMs": 19.2138
+  },
+  {
+    "Count": 50000,
+    "Operation": "search",
+    "TotalMs": 207.7303,
+    "UiGapMs": 32.57389999999998
+  },
+  {
+    "Count": 50000,
+    "Operation": "scope",
+    "TotalMs": 10.6245,
+    "UiGapMs": 10.6074
+  },
+  {
+    "Count": 50000,
+    "Operation": "quality",
+    "TotalMs": 275.1822,
+    "UiGapMs": 41.56779999999998
+  },
+  {
+    "Count": 50000,
+    "Operation": "bulk",
+    "TotalMs": 92.4134,
+    "UiGapMs": 22.6353
+  },
+  {
+    "Count": 50000,
+    "Operation": "search",
+    "TotalMs": 216.0491,
+    "UiGapMs": 18.326599999999985
+  },
+  {
+    "Count": 50000,
+    "Operation": "scope",
+    "TotalMs": 12.2808,
+    "UiGapMs": 11.4223
+  },
+  {
+    "Count": 50000,
+    "Operation": "quality",
+    "TotalMs": 295.7327,
+    "UiGapMs": 49.97989999999999
+  },
+  {
+    "Count": 50000,
+    "Operation": "bulk",
+    "TotalMs": 81.4406,
+    "UiGapMs": 18.583099999999995
+  },
+  {
+    "Count": 50000,
+    "Operation": "search",
+    "TotalMs": 207.7529,
+    "UiGapMs": 18.571799999999996
+  },
+  {
+    "Count": 50000,
+    "Operation": "scope",
+    "TotalMs": 10.1441,
+    "UiGapMs": 9.5542
+  },
+  {
+    "Count": 50000,
+    "Operation": "quality",
+    "TotalMs": 224.8638,
+    "UiGapMs": 33.44319999999999
+  },
+  {
+    "Count": 50000,
+    "Operation": "bulk",
+    "TotalMs": 159.7272,
+    "UiGapMs": 23.1804
+  }
+]

@@ -268,7 +268,7 @@ public sealed partial class TranslationInspectorViewModel : WorkspaceInspectorVi
     }
 }
 
-public sealed class TranslationWorkspaceViewModel : WorkspaceViewModelBase, IDisposable
+public sealed partial class TranslationWorkspaceViewModel : WorkspaceViewModelBase, IDisposable
 {
     private readonly ProjectSessionViewModel _session;
     private readonly IRenPyImagePreviewService _imagePreviewService;
@@ -302,6 +302,7 @@ public sealed class TranslationWorkspaceViewModel : WorkspaceViewModelBase, IDis
         : base("translation", "翻译", "\uE8A5")
     {
         _session = session;
+        InitializeOperations();
         _translationMemory = session.Snapshot is { } snapshot ? new TranslationMemoryIndex(snapshot) : null;
         _imagePreviewService = imagePreviewService ?? new RenPyImagePreviewService();
         _ownsImagePreviewService = imagePreviewService is null;
@@ -359,6 +360,7 @@ public sealed class TranslationWorkspaceViewModel : WorkspaceViewModelBase, IDis
             if (!SetProperty(ref _statusFilter, value)) return;
             if (IsQualityView && NeedsResultsRefresh) RebuildProjection();
             else ApplySearchFilter();
+            PositionChanged?.Invoke(this, EventArgs.Empty);
         }
     }
     public string SelectedScope
@@ -369,15 +371,21 @@ public sealed class TranslationWorkspaceViewModel : WorkspaceViewModelBase, IDis
             if (value is null || !SetProperty(ref _selectedScope, value)) return;
             RecalculateCoverage();
             ApplySearchFilter();
+            PositionChanged?.Invoke(this, EventArgs.Empty);
         }
     }
     public bool NeedsResultsRefresh { get => _needsResultsRefresh; private set => SetProperty(ref _needsResultsRefresh, value); }
-    public bool HasActiveFilters => HasSearch || StatusFilter != TranslationStatusFilter.All || SelectedScope != "all";
+    public bool HasActiveFilters => HasSearch || StatusFilter != TranslationStatusFilter.All || SelectedScope != "all" || ReviewFilter is not null;
     public bool IsQualityView => ViewMode == TranslationViewMode.Quality;
     public string QualitySummary => $"发现 {_coverageItems.Count:N0} 条需核对译文。选中问题即可编辑，Enter 聚焦译文；修改后点击刷新结果。";
 
     private void ClearFilters()
     {
+        _reviewFilter = null;
+        _searchField = TranslationSearchField.All;
+        _searchCaseSensitive = false;
+        _searchRegex = false;
+        foreach (var name in new[] { nameof(ReviewFilter), nameof(SearchField), nameof(SearchCaseSensitive), nameof(SearchRegex) }) OnPropertyChanged(name);
         _searchText = string.Empty;
         _statusFilter = TranslationStatusFilter.All;
         _selectedScope = "all";
@@ -425,7 +433,8 @@ public sealed class TranslationWorkspaceViewModel : WorkspaceViewModelBase, IDis
         {
             if (!SetProperty(ref _searchText, value)) return;
             ClearSearchCommand.NotifyCanExecuteChanged();
-            ApplySearchFilter();
+            ApplySearchFilter(debounce: true);
+            PositionChanged?.Invoke(this, EventArgs.Empty);
         }
     }
 
@@ -435,7 +444,9 @@ public sealed class TranslationWorkspaceViewModel : WorkspaceViewModelBase, IDis
         set
         {
             if (!SetProperty(ref _selectedItem, value)) return;
+            _selectionVersion++;
             UpdateInspector(value);
+            RefreshEditorialSelection();
             if (IsQualityView && value is not null) IsInspectorOpen = true;
             StartImagePreviewUpdate(value);
             if (value is not null)
@@ -509,6 +520,7 @@ public sealed class TranslationWorkspaceViewModel : WorkspaceViewModelBase, IDis
         _session.SnapshotChanged -= OnSnapshotChanged;
         _session.SaveCompleted -= OnSaveCompleted;
         _session.PropertyChanged -= OnSessionPropertyChanged;
+        DisposeOperations();
         Task[] requests;
         lock (_previewSync)
         {
@@ -525,6 +537,7 @@ public sealed class TranslationWorkspaceViewModel : WorkspaceViewModelBase, IDis
     /// <summary>窗口关闭前等待全部预览请求退出，避免索引仍在构建时释放 watcher 或锁。</summary>
     public async Task StopPreviewAsync(CancellationToken cancellationToken)
     {
+        await _operations.CancelAllAsync(cancellationToken);
         while (true)
         {
             Task[] requests;
@@ -540,6 +553,7 @@ public sealed class TranslationWorkspaceViewModel : WorkspaceViewModelBase, IDis
 
     private void OnTranslationChanged(object? sender, EventArgs args)
     {
+        InvalidateEditedOperations();
         UpdateSelectedPresentation();
         if (HasActiveFilters || IsQualityView) NeedsResultsRefresh = true;
         MoveNextPendingCommand.NotifyCanExecuteChanged();
@@ -548,6 +562,7 @@ public sealed class TranslationWorkspaceViewModel : WorkspaceViewModelBase, IDis
 
     private void OnSaveCompleted(object? sender, EventArgs args)
     {
+        _filterRows = null;
         foreach (var item in _coverageItems) item.MarkPersisted();
         if (HasActiveFilters || IsQualityView) NeedsResultsRefresh = true;
         RecalculateCoverage();
@@ -555,6 +570,12 @@ public sealed class TranslationWorkspaceViewModel : WorkspaceViewModelBase, IDis
 
     private void OnSnapshotChanged(object? sender, ProjectSnapshot? snapshot)
     {
+        var savedUndo = _session.IsReloadingAfterSave ? _bulkUndo : null;
+        var savedUndoEdited = _bulkUndoEdited;
+        var savedEditorialUndo = _session.IsReloadingAfterSave ? _editorialUndo : null;
+        ResetOperations();
+        if (snapshot is not null && savedUndo is not null) RebindSavedUndo(snapshot, savedUndo, savedUndoEdited);
+        if (_bulkUndo is not null) _editorialUndo = savedEditorialUndo;
         _translationMemory = snapshot is null ? null : new TranslationMemoryIndex(snapshot);
         if (snapshot is not null)
         {
@@ -562,12 +583,30 @@ public sealed class TranslationWorkspaceViewModel : WorkspaceViewModelBase, IDis
             _indexedPreviewProjectPath = snapshot.ProjectRoot;
             _imagePreviewService.InvalidateProject(snapshot.ProjectRoot);
         }
-        RefreshFromSnapshot();
+        _restoringState = true;
+        try
+        {
+            if (snapshot is not null) _stateScopeInvalidated = false;
+            RestoreSavedState(snapshot);
+            if (snapshot is null) RefreshFromSnapshot();
+        }
+        finally { _restoringState = false; }
     }
 
     private void OnSessionPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs args)
     {
         if (args.PropertyName is not (nameof(ProjectSessionViewModel.ProjectPath) or nameof(ProjectSessionViewModel.Language))) return;
+        RememberWorkspaceState();
+        _stateScopeInvalidated = true;
+        RestoreEditorial(null);
+        _searchText = string.Empty;
+        _statusFilter = TranslationStatusFilter.All;
+        _selectedScope = "all";
+        _viewMode = TranslationViewMode.Flow;
+        _groupingMode = FlowGroupingMode.StoryPath;
+        ScrollAnchor = null;
+        foreach (var name in new[] { nameof(SearchText), nameof(StatusFilter), nameof(SelectedScope), nameof(ViewMode), nameof(GroupingMode), nameof(IsQualityView), nameof(IsBookmarkView) }) OnPropertyChanged(name);
+        ResetOperations();
         lock (_previewSync) _previewCancellation?.Cancel();
         InvalidatePreviewProject(_indexedPreviewProjectPath);
         _indexedPreviewProjectPath = null;
@@ -601,6 +640,12 @@ public sealed class TranslationWorkspaceViewModel : WorkspaceViewModelBase, IDis
         }
         if (node is null) return false;
         var item = VisibleItems.FirstOrDefault(x => x.Key == node.Id);
+        if (item is null && _coverageItems.Any(candidate => candidate.Key == node.Id))
+        {
+            _pendingNavigation = request with { NodeId = node.Id };
+            ApplySearchFilter(node.Id);
+            return true;
+        }
         if (item is null) return false;
         SelectedItem = item;
         AnchorItem = item;
@@ -707,15 +752,27 @@ public sealed class TranslationWorkspaceViewModel : WorkspaceViewModelBase, IDis
             return;
         }
 
+        CancelResults();
+        if (IsQualityView && snapshot.TranslationUnits.Count() + snapshot.SharedStrings.Count > 2000)
+        {
+            StartQuality(snapshot, preferredId);
+            return;
+        }
         var projectedItems = (ViewMode switch
         {
             TranslationViewMode.Strings => snapshot.SharedStrings.Select(ContentItem.FromSharedString),
-            TranslationViewMode.Quality => _quality.Check(snapshot).Select(ContentItem.FromQualityIssue),
+            TranslationViewMode.Quality => CheckEditorialQuality(TranslationReadSnapshot.Capture(snapshot), _glossary, CancellationToken.None).Select(ContentItem.FromQualityIssue),
             TranslationViewMode.Unbound => snapshot.TranslationUnits.Where(x => x.IsUnboundFlowTranslation).Select(ContentItem.FromTranslation),
             TranslationViewMode.Bookmarks => BuildFlowItems(snapshot, FlowGroupingMode.StoryPath)
                 .Where(item => item.Node is not null && _bookmarkedNodeIds.Contains(item.Key)),
             _ => BuildFlowItems(snapshot, GroupingMode)
         }).ToList();
+        FinishProjection(projectedItems, preferredId);
+    }
+
+    private void FinishProjection(IReadOnlyList<ContentItem> projectedItems, string? preferredId)
+    {
+        _filterRows = null;
         foreach (var item in projectedItems)
             item.SetBookmarked(item.Node is not null && _bookmarkedNodeIds.Contains(item.Key));
         _coverageItems = projectedItems;
@@ -725,10 +782,14 @@ public sealed class TranslationWorkspaceViewModel : WorkspaceViewModelBase, IDis
         ApplySearchFilter(preferredId);
     }
 
-    private void ApplySearchFilter(string? preferredId = null)
+    private void ApplySearchFilter(string? preferredId = null, bool debounce = false)
     {
         preferredId ??= SelectedItem?.Key ?? ScrollAnchor?.ItemId;
         if (!IsQualityView) NeedsResultsRefresh = false;
+        var query = CreateSearch();
+        if (query is null) { CancelResults(); return; }
+        if (_coverageItems.Count > 2000) { StartFilter(preferredId, debounce); return; }
+        _filterVersion++;
         IEnumerable<ContentItem> items = _coverageItems.Where(item => _progressScopes.Contains(item, SelectedScope));
         items = StatusFilter switch
         {
@@ -738,21 +799,32 @@ public sealed class TranslationWorkspaceViewModel : WorkspaceViewModelBase, IDis
             TranslationStatusFilter.Modified => items.Where(item => item.IsModified),
             _ => items
         };
-        var search = SearchText.Trim();
-        if (search.Length > 0) items = items.Where(x => x.SearchText.Contains(search, StringComparison.OrdinalIgnoreCase));
-        VisibleItems = items.ToArray();
+        if (ReviewFilter is { } review) items = items.Where(item => item.IsEditable && ReviewFor(item) == review);
+        try { PublishFilteredItems(items.Where(item => SearchMatches(query, item)).ToArray(), preferredId); }
+        catch (RegexMatchTimeoutException) { SearchError = "正则表达式执行超时，请简化后重试。"; }
+    }
+
+    private void PublishFilteredItems(IReadOnlyList<ContentItem> items, string? preferredId)
+    {
+        VisibleItems = items;
         _visibleItemIndexes.Clear();
         for (var index = 0; index < VisibleItems.Count; index++)
             _visibleItemIndexes.TryAdd(VisibleItems[index].Key, index);
         OnPropertyChanged(nameof(VisibleItems));
         SelectedItem = preferredId is null ? null : VisibleItems.FirstOrDefault(x => x.Key == preferredId);
         if (SelectedItem is not null) AnchorItem = SelectedItem;
+        if (_pendingNavigation is { } request && SelectedItem?.Key == request.NodeId)
+        {
+            IsInspectorOpen = request.OpenInspector;
+            if (request.FocusTarget == NavigationFocusTarget.TranslationEditor) Inspector.RequestFocus();
+            _pendingNavigation = null;
+        }
         NotifyCollectionPresentation();
     }
 
     private void RebuildProgressScopes()
     {
-        _progressScopes = new TranslationProgressScopes(_session.Snapshot, _coverageItems);
+        _progressScopes = new TranslationProgressScopes(_session.Snapshot, _coverageItems, _progressScopes);
         if (!_progressScopes.Options.Any(option => option.Id == SelectedScope))
         {
             _selectedScope = "all";
@@ -860,6 +932,7 @@ public sealed class TranslationWorkspaceViewModel : WorkspaceViewModelBase, IDis
         if (item?.Node is null) return;
         var nodeId = item.Node.Id;
         var bookmarked = ToggleBookmarkState(_bookmarkedNodeIds, nodeId);
+        _bookmarkRecords = null;
         item.SetBookmarked(bookmarked);
         OnPropertyChanged(nameof(BookmarkedCount));
         if (ViewMode == TranslationViewMode.Bookmarks)
@@ -867,6 +940,7 @@ public sealed class TranslationWorkspaceViewModel : WorkspaceViewModelBase, IDis
             RebuildProjection(item.Key);
         }
         _session.Tasks.StatusMessage = bookmarked ? "已添加书签。" : "已移除书签。";
+        PositionChanged?.Invoke(this, EventArgs.Empty);
     }
 
     internal static bool ToggleBookmarkState(HashSet<string> bookmarks, string nodeId)

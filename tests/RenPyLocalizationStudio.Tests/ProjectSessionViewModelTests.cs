@@ -6,7 +6,7 @@ using RenPyLocalizationStudio.Core.Services;
 
 namespace RenPyLocalizationStudio.Tests;
 
-public sealed class ProjectSessionViewModelTests
+public sealed partial class ProjectSessionViewModelTests
 {
     [Fact]
     public async Task Settings_损坏Json返回明确诊断和默认值()

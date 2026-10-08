@@ -3,6 +3,7 @@ using System.Text.Json;
 using System.Windows;
 using System.Windows.Media;
 using Microsoft.Win32;
+using RenPyLocalizationStudio.App.ViewModels;
 using RenPyLocalizationStudio.Core;
 using RenPyLocalizationStudio.Core.Services;
 
@@ -448,7 +449,8 @@ public sealed record AppSettings(
     bool AutoSaveEnabled = false,
     string? LastTranslationItemId = null,
     string? LastTranslationViewMode = null,
-    string? LastTranslationGroupingMode = null);
+    string? LastTranslationGroupingMode = null,
+    IReadOnlyList<TranslationWorkspaceState>? TranslationWorkspaces = null);
 
 public sealed class AppSettingsStore
 {
