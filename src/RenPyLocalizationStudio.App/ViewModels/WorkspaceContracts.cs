@@ -45,10 +45,15 @@ public abstract class WorkspaceViewModelBase : ObservableObject
         get => _isInspectorOpen;
         set
         {
-            if (SetProperty(ref _isInspectorOpen, value)) OnPropertyChanged(nameof(IsInspectorVisible));
+            if (SetProperty(ref _isInspectorOpen, value))
+            {
+                OnPropertyChanged(nameof(IsInspectorVisible));
+                OnPropertyChanged(nameof(InspectorToggleText));
+            }
         }
     }
 
+    public string InspectorToggleText => IsInspectorOpen ? "收起检查器" : "打开检查器";
     public bool IsInspectorVisible => InspectorContent is not null && IsInspectorOpen;
 
     public virtual Task ActivateAsync(CancellationToken cancellationToken) => Task.CompletedTask;

@@ -127,6 +127,7 @@ public sealed class ContentItem : ObservableObject
     public FlowNode? Node { get; init; }
     public ExtraTextCandidate? ExtraText { get; init; }
     public Diagnostic? Diagnostic { get; init; }
+    public bool IsModified => SharedString?.Definitions.Any(unit => unit.IsDirty) ?? Unit?.IsDirty ?? false;
     public bool IsEditable => SharedString is not null || Unit is not null;
     public bool IsLabel => PresentationKind == ContentPresentationKind.Label;
     public bool IsDialogue => PresentationKind == ContentPresentationKind.Dialogue;
@@ -215,6 +216,29 @@ public sealed class ContentItem : ObservableObject
         Diagnostic = diagnostic
     }.WithCurrentStatus();
 
+    public static ContentItem FromQualityIssue(TranslationQualityIssue issue)
+    {
+        var diagnostic = issue.Diagnostics.OrderByDescending(value => value.Severity).First();
+        var unit = issue.Unit;
+        return new ContentItem
+        {
+            Key = issue.SharedString is { } shared ? "quality:shared:" + shared.OldText
+                : $"quality:unit:{unit!.RelativeTlPath}:{unit.HeaderLine}",
+            Title = issue.Original,
+            BodyText = issue.Original,
+            PresentationKind = ContentPresentationKind.Diagnostic,
+            Subtitle = string.Join(" · ", issue.Diagnostics.Select(value => value.Message)),
+            SearchTextBase = $"{issue.Original} {string.Join(' ', issue.Diagnostics.Select(value => value.Code))} {unit?.RelativeTlPath} {diagnostic.RelativePath}",
+            Accent = Brush(diagnostic.Severity == DiagnosticSeverity.Error ? Color.FromRgb(248, 81, 73)
+                : diagnostic.Severity == DiagnosticSeverity.Warning ? Color.FromRgb(210, 153, 34) : Color.FromRgb(88, 166, 255)),
+            IndentMargin = new Thickness(0),
+            Diagnostic = diagnostic,
+            Unit = unit,
+            Node = unit?.BoundNode,
+            SharedString = issue.SharedString
+        }.WithCurrentStatus();
+    }
+
     public static ContentItem FromExtraText(ExtraTextCandidate candidate) => new ContentItem()
     {
         Key = candidate.Id,
@@ -236,6 +260,7 @@ public sealed class ContentItem : ObservableObject
         Badge = text;
         IsStatusVisible = visible;
         OnPropertyChanged(nameof(IsTranslationComplete));
+        OnPropertyChanged(nameof(IsModified));
     }
 
     internal void SetBookmarked(bool value) => IsBookmarked = value;

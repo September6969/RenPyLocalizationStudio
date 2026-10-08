@@ -3,18 +3,56 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:behaviors="clr-namespace:RenPyLocalizationStudio.App.Behaviors"
              xmlns:vm="clr-namespace:RenPyLocalizationStudio.App.ViewModels">
+    <UserControl.Resources>
+        <Style x:Key="PreviewCollapseStyle" TargetType="ToggleButton">
+            <Setter Property="Foreground" Value="{DynamicResource TextSubtleBrush}" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Template"><Setter.Value>
+                <ControlTemplate TargetType="ToggleButton">
+                    <Border x:Name="Surface" Background="{TemplateBinding Background}" CornerRadius="4" Padding="{TemplateBinding Padding}">
+                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Surface" Property="Background" Value="{DynamicResource BackgroundLevel2}" /></Trigger>
+                        <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Surface" Property="Background" Value="{DynamicResource BrandAccentSoftBrush}" /></Trigger>
+                        <Trigger Property="IsChecked" Value="True"><Setter Property="Foreground" Value="{DynamicResource BrandAccentBrush}" /></Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value></Setter>
+        </Style>
+    </UserControl.Resources>
     <Grid>
         <Grid.RowDefinitions>
-            <RowDefinition Height="42"/>
+            <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
         </Grid.RowDefinitions>
         
         <!-- Toolbar Header -->
         <Border Grid.Row="0" Background="{DynamicResource BackgroundLevel1}" BorderThickness="0,0,0,1" BorderBrush="{DynamicResource BackgroundLevel2}">
             <Grid Margin="16,8">
-                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                    <TextBlock Text="{Binding Workspace.ViewTitle}" FontWeight="SemiBold" FontSize="14" />
+                <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                <WrapPanel VerticalAlignment="Center">
+                    <ComboBox Width="118" MinHeight="28" ItemsSource="{Binding Workspace.ViewModes}" SelectedItem="{Binding Workspace.ViewMode}"
+                              AutomationProperties.Name="翻译视图" ToolTip="切换剧情流、字符串表、未绑定译文、书签或质量检查">
+            <ComboBox.ItemTemplate>
+                <DataTemplate>
+                    <TextBlock>
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock">
+                                <Setter Property="Text" Value="{Binding}" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding}" Value="{x:Static vm:TranslationViewMode.Flow}"><Setter Property="Text" Value="剧情流" /></DataTrigger>
+                                    <DataTrigger Binding="{Binding}" Value="{x:Static vm:TranslationViewMode.Strings}"><Setter Property="Text" Value="字符串表" /></DataTrigger>
+                                    <DataTrigger Binding="{Binding}" Value="{x:Static vm:TranslationViewMode.Unbound}"><Setter Property="Text" Value="未绑定" /></DataTrigger>
+                                    <DataTrigger Binding="{Binding}" Value="{x:Static vm:TranslationViewMode.Bookmarks}"><Setter Property="Text" Value="书签" /></DataTrigger>
+                                    <DataTrigger Binding="{Binding}" Value="{x:Static vm:TranslationViewMode.Quality}"><Setter Property="Text" Value="质量检查" /></DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
+                </DataTemplate>
+            </ComboBox.ItemTemplate>
+                    </ComboBox>
                     <TextBlock Text="{Binding Workspace.ItemCount}" Margin="12,0,0,0" FontSize="12" Foreground="{DynamicResource TextMutedBrush}" VerticalAlignment="Center" />
                     <StackPanel Orientation="Horizontal" Margin="24,0,0,0"
                                 Visibility="{Binding Workspace.HasCoverage, Converter={StaticResource BooleanToVisibilityConverter}}">
@@ -24,15 +62,46 @@
                                      Maximum="100" Value="{Binding Workspace.CoveragePercent, Mode=OneWay}" />
                         <TextBlock Text="{Binding Workspace.CoverageText}" FontSize="12" Foreground="{DynamicResource TextSubtleBrush}" VerticalAlignment="Center" />
                     </StackPanel>
+                </WrapPanel>
+                <Grid Grid.Row="1" Margin="0,8,0,0">
+                    <TextBox x:Name="SearchBox" Text="{Binding Workspace.SearchText, UpdateSourceTrigger=PropertyChanged, Delay=180}"
+                             PreviewKeyDown="SearchBox_PreviewKeyDown" Padding="8,5"
+                             ToolTip="Ctrl+F 搜索；Esc 清除关键词" AutomationProperties.Name="搜索剧情流" />
+                    <TextBlock Text="搜索原文、译文、Label 或路径  ·  Ctrl+F" IsHitTestVisible="False" Margin="9,0"
+                               VerticalAlignment="Center" Foreground="{DynamicResource TextMutedBrush}" FontSize="11"
+                               TextTrimming="CharacterEllipsis">
+                        <TextBlock.Style><Style TargetType="TextBlock">
+                            <Setter Property="Visibility" Value="Collapsed" />
+                            <Style.Triggers><DataTrigger Binding="{Binding Text, ElementName=SearchBox}" Value="">
+                                <Setter Property="Visibility" Value="Visible" />
+                            </DataTrigger></Style.Triggers>
+                        </Style></TextBlock.Style>
+                    </TextBlock>
+                </Grid>
+                <WrapPanel Grid.Row="2" Margin="0,6,0,0">
+                    <ComboBox Width="110" ItemsSource="{Binding Workspace.StatusFilters}" DisplayMemberPath="Label" SelectedValuePath="Value"
+                              SelectedValue="{Binding Workspace.StatusFilter, Mode=TwoWay}" ToolTip="已修改表示尚未保存的编辑；已译仅表示非空且无共享冲突，仍可能存在质量问题。" AutomationProperties.Name="译文状态筛选" Margin="0,0,6,4" />
+                    <ComboBox Width="210" ItemsSource="{Binding Workspace.ProgressScopes}" DisplayMemberPath="Label" SelectedValuePath="Id"
+                              SelectedValue="{Binding Workspace.SelectedScope, Mode=TwoWay}" ToolTip="{Binding SelectedItem.Label, RelativeSource={RelativeSource Self}}" AutomationProperties.Name="文件或Label进度范围" Margin="0,0,0,4">
+                        <ComboBox.ItemsPanel><ItemsPanelTemplate><VirtualizingStackPanel /></ItemsPanelTemplate></ComboBox.ItemsPanel>
+                    </ComboBox>
+                </WrapPanel>
+                <StackPanel Grid.Row="4" Margin="0,5,0,0">
+                    <TextBlock Text="{Binding Workspace.QualitySummary}" TextWrapping="Wrap" FontSize="11" Foreground="{DynamicResource TextMutedBrush}"
+                               Visibility="{Binding Workspace.IsQualityView, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                    <TextBlock Text="译文已变化，点击「刷新结果」更新列表。当前条目保留，方便继续编辑。" TextWrapping="Wrap" FontSize="11"
+                               Foreground="{DynamicResource SemanticWarningBrush}" Visibility="{Binding Workspace.NeedsResultsRefresh, Converter={StaticResource BooleanToVisibilityConverter}}" />
                 </StackPanel>
-                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                <WrapPanel Grid.Row="3" Margin="0,6,0,0" VerticalAlignment="Center">
+                    <Button Content="下一条待译" Command="{Binding Workspace.MoveNextPendingCommand}" Style="{StaticResource GhostButtonStyle}" Padding="12,6" Margin="0,0,8,0" ToolTip="F8 · 在当前列表中循环查找空译文或冲突译文，并聚焦编辑器" />
+                    <Button Content="刷新结果" Command="{Binding Workspace.RefreshResultsCommand}" Style="{StaticResource GhostButtonStyle}" Padding="12,6" />
                     <Button Content="清除筛选" Command="{Binding Workspace.ClearSearchCommand}" Style="{StaticResource GhostButtonStyle}" Padding="12,6" />
                     <Button Content="定位原代码" Command="{Binding Workspace.NavigateBookmarkCommand}"
                             CommandParameter="{Binding Workspace.SelectedItem}" Style="{StaticResource GhostButtonStyle}"
                             Padding="12,6" Margin="8,0,0,0" ToolTip="从书签回到原始剧情流中的代码行"
                             Visibility="{Binding Workspace.IsBookmarkView, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                    <Button Content="打开检查器" Command="{Binding Workspace.ToggleInspectorCommand}" Style="{StaticResource GhostButtonStyle}" Padding="12,6" Margin="8,0,0,0" />
-                </StackPanel>
+                    <Button Content="{Binding Workspace.InspectorToggleText}" Command="{Binding Workspace.ToggleInspectorCommand}" Style="{StaticResource GhostButtonStyle}" Padding="12,6" Margin="8,0,0,0" />
+                </WrapPanel>
             </Grid>
         </Border>
 
@@ -40,11 +109,11 @@
         <Grid Grid.Row="1">
             <Grid.RowDefinitions>
                 <!-- Upper Row: Code/Dialogue Flow List -->
-                <RowDefinition Height="3*" MinHeight="140" />
+                <RowDefinition x:Name="FlowRow" Height="3*" MinHeight="140" />
                 <!-- Middle Row: Draggable GridSplitter -->
                 <RowDefinition Height="Auto" />
                 <!-- Lower Row: Game Image Preview Panel -->
-                <RowDefinition Height="2*" MinHeight="110" />
+                <RowDefinition x:Name="PreviewRow" Height="2*" MinHeight="110" />
             </Grid.RowDefinitions>
 
             <!-- Upper: Flow List -->
@@ -96,7 +165,7 @@
                                     </TextBlock>
                                     <TextBlock x:Name="StructureLine" Text="{Binding BodyText}" FontWeight="SemiBold" FontSize="13"
                                                Foreground="{DynamicResource DialogueTextBrush}" TextWrapping="Wrap" />
-                                    <TextBlock Text="{Binding Subtitle}" Margin="0,3,0,0" FontSize="11"
+                                    <TextBlock Text="{Binding Subtitle}" ToolTip="{Binding Subtitle}" Margin="0,3,0,0" FontSize="11"
                                                Foreground="{DynamicResource PathTextBrush}" TextTrimming="CharacterEllipsis" />
                                 </StackPanel>
                                 
@@ -146,8 +215,19 @@
                 </ListView.ItemTemplate>
             </ListView>
 
+            <!-- 按当前视图说明空列表的原因，并提供恢复入口。 -->
+            <StackPanel Grid.Row="0" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="24"
+                        MaxWidth="420" Visibility="{Binding Workspace.IsListEmpty, Converter={StaticResource BooleanToVisibilityConverter}}">
+                <TextBlock Text="{Binding Workspace.EmptyStateTitle}" FontSize="16" FontWeight="SemiBold" TextAlignment="Center" TextWrapping="Wrap" />
+                <TextBlock Text="{Binding Workspace.EmptyStateHint}" Foreground="{DynamicResource TextMutedBrush}"
+                           Margin="0,8,0,12" TextAlignment="Center" TextWrapping="Wrap" />
+                <Button Content="清除筛选" Command="{Binding Workspace.ClearSearchCommand}"
+                        HorizontalAlignment="Center" Style="{StaticResource GhostButtonStyle}" Padding="12,6"
+                        Visibility="{Binding Workspace.HasActiveFilters, Converter={StaticResource BooleanToVisibilityConverter}}" />
+            </StackPanel>
+
             <!-- Middle: Draggable GridSplitter -->
-            <GridSplitter Grid.Row="1" Style="{StaticResource RowGridSplitterStyle}" />
+            <GridSplitter x:Name="PreviewSplitter" Grid.Row="1" Style="{StaticResource RowGridSplitterStyle}" />
 
             <!-- Lower: Game Image Preview Panel -->
             <Border Grid.Row="2" Background="{DynamicResource BackgroundLevel1}" BorderThickness="0,1,0,0"
@@ -173,17 +253,16 @@
                                 <TextBlock Text="&#xEB9F;" FontFamily="Segoe Fluent Icons" FontSize="13"
                                            Foreground="{DynamicResource BrandAccentBrush}" VerticalAlignment="Center" />
                                 <TextBlock Text="游戏画面预览" FontWeight="SemiBold" FontSize="12" Margin="6,0,0,0"
-                                           VerticalAlignment="Center" />
+                                           VerticalAlignment="Center">
+                                    <TextBlock.ToolTip>
+                                        <StackPanel MaxWidth="420">
+                                            <TextBlock Text="{Binding Workspace.ImagePreview.SceneTag}" TextWrapping="Wrap" />
+                                            <TextBlock Text="{Binding Workspace.ImagePreview.SelectedImage.RelativePath}" TextWrapping="Wrap" />
+                                            <TextBlock Text="{Binding Workspace.ImagePreview.SelectedImageDetails}" />
+                                        </StackPanel>
+                                    </TextBlock.ToolTip>
+                                </TextBlock>
                             </StackPanel>
-
-                            <!-- Scene statement badge -->
-                            <Border Grid.Column="1" Margin="10,0,0,0" Padding="8,2" CornerRadius="4"
-                                    Background="{DynamicResource BrandAccentSoftBrush}" VerticalAlignment="Center"
-                                    Visibility="{Binding Workspace.ImagePreview.HasImages, Converter={StaticResource BooleanToVisibilityConverter}}"
-                                    ToolTip="{Binding Workspace.ImagePreview.SelectedImage.RelativePath}">
-                                <TextBlock Text="{Binding Workspace.ImagePreview.SceneTag}" FontSize="11"
-                                           Foreground="{DynamicResource BrandAccentBrush}" FontWeight="Medium" />
-                            </Border>
 
                             <!-- Multi-image selector tabs (Background vs Sprites) -->
                             <ListBox Grid.Column="2" ItemsSource="{Binding Workspace.ImagePreview.AvailableImages}"
@@ -207,13 +286,18 @@
 
                             <!-- Right actions & details -->
                             <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Center">
-                                <Border Background="{DynamicResource BackgroundLevel2}" CornerRadius="4" Padding="6,2" Margin="0,0,8,0"
-                                        Visibility="{Binding Workspace.ImagePreview.HasImages, Converter={StaticResource BooleanToVisibilityConverter}}"
-                                        ToolTip="{Binding Workspace.ImagePreview.SelectedImage.RelativePath}">
-                                    <TextBlock Text="{Binding Workspace.ImagePreview.SelectedImageDetails}" FontSize="11"
-                                               Foreground="{DynamicResource TextSubtleBrush}" VerticalAlignment="Center" />
-                                </Border>
-                                <Button Content="打开所在目录" Command="{Binding Workspace.ImagePreview.OpenLocationCommand}"
+                                <ToggleButton x:Name="PreviewCollapseToggle" Style="{StaticResource PreviewCollapseStyle}" IsChecked="{Binding Workspace.ImagePreview.IsCollapsed, Mode=TwoWay}"
+                                              Checked="PreviewCollapse_Changed" Unchecked="PreviewCollapse_Changed"
+                                              Padding="8,3" Margin="0,0,8,0" ToolTip="收起画面预览，为剧情列表腾出空间"
+                                              AutomationProperties.Name="收起或展开画面预览">
+                                    <TextBlock><TextBlock.Style><Style TargetType="TextBlock">
+                                        <Setter Property="Text" Value="收起预览" />
+                                        <Style.Triggers><DataTrigger Binding="{Binding Workspace.ImagePreview.IsCollapsed}" Value="True">
+                                            <Setter Property="Text" Value="展开预览" />
+                                        </DataTrigger></Style.Triggers>
+                                    </Style></TextBlock.Style></TextBlock>
+                                </ToggleButton>
+                                <Button Content="&#xE8B7;" FontFamily="Segoe Fluent Icons" AutomationProperties.Name="打开图片所在目录" Command="{Binding Workspace.ImagePreview.OpenLocationCommand}"
                                         Style="{StaticResource GhostButtonStyle}" Padding="8,3" MinHeight="22" FontSize="11"
                                         ToolTip="在 Windows 资源管理器中定位此素材图片" />
                             </StackPanel>
@@ -221,7 +305,8 @@
                     </Border>
 
                     <!-- Image Display Area -->
-                    <Grid Grid.Row="1" Background="{DynamicResource BackgroundLevel0}">
+                    <Grid Grid.Row="1" Background="{DynamicResource BackgroundLevel0}"
+                          Visibility="{Binding Workspace.ImagePreview.IsCollapsed, Converter={StaticResource InverseBooleanToVisibilityConverter}}">
                         <!-- Loaded Image -->
                         <Image Source="{Binding Workspace.ImagePreview.CurrentBitmap}" Stretch="Uniform"
                                AutomationProperties.Name="当前剧情图片预览"
@@ -230,12 +315,12 @@
                                Visibility="{Binding Workspace.ImagePreview.HasImages, Converter={StaticResource BooleanToVisibilityConverter}}" />
 
                         <!-- Empty / Placeholder State -->
-                        <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" Opacity="0.6"
+                        <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" Opacity="0.6" Margin="20"
                                     Visibility="{Binding Workspace.ImagePreview.HasImages, Converter={StaticResource InverseBooleanToVisibilityConverter}}">
                             <TextBlock Text="&#xE8B9;" FontFamily="Segoe Fluent Icons" FontSize="32"
                                        HorizontalAlignment="Center" Foreground="{DynamicResource TextSubtleBrush}" />
                             <TextBlock Text="{Binding Workspace.ImagePreview.StatusHint}" Margin="0,8,0,0" FontSize="12"
-                                       Foreground="{DynamicResource TextMutedBrush}" HorizontalAlignment="Center" />
+                                       Foreground="{DynamicResource TextMutedBrush}" HorizontalAlignment="Center" TextWrapping="Wrap" TextAlignment="Center" />
                         </StackPanel>
                     </Grid>
                 </Grid>
