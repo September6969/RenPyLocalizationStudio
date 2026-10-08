@@ -23,6 +23,22 @@ public sealed class WorkspaceTaskCoordinator : IDisposable
         return slot.ReplaceAsync(operation, ReportException);
     }
 
+    /// <summary>后台任务替换后仍在捕获的界面上下文启动，用于需要发布界面结果的异步操作。</summary>
+    public Task RunLatestOnContextAsync(string key, Func<CancellationToken, Task> operation) =>
+        RunLatestAsync(key, token =>
+        {
+            if (_synchronizationContext is null || SynchronizationContext.Current == _synchronizationContext)
+                return operation(token);
+            var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            _synchronizationContext.Post(async _ =>
+            {
+                try { token.ThrowIfCancellationRequested(); await operation(token); completion.TrySetResult(); }
+                catch (OperationCanceledException) when (token.IsCancellationRequested) { completion.TrySetCanceled(token); }
+                catch (Exception ex) { completion.TrySetException(ex); }
+            }, null);
+            return completion.Task;
+        });
+
     /// <summary>合并同一键的高频请求，并在安静期结束后只执行最后一次操作。</summary>
     public Task RunLatestAfterDelayAsync(
         string key,

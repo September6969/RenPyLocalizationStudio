@@ -8,6 +8,19 @@ namespace RenPyLocalizationStudio.App.Views;
 
 public partial class TranslationMainView : UserControl
 {
+    private void Editorial_Click(object sender, RoutedEventArgs e)
+    {
+        if (DataContext is not TranslationMainContentViewModel content) return;
+        var tab = int.TryParse((sender as FrameworkElement)?.Tag?.ToString(), out var value) ? value : 0;
+        new TranslationToolsWindow(content.Workspace, tab) { Owner = Window.GetWindow(this) }.ShowDialog();
+    }
+
+    private void Bulk_Click(object sender, RoutedEventArgs e)
+    {
+        if (DataContext is not TranslationMainContentViewModel content) return;
+        new BulkTranslationWindow(content.Workspace) { Owner = Window.GetWindow(this) }.ShowDialog();
+    }
+
     private GridLength _expandedPreviewHeight = new(2, GridUnitType.Star);
     private GridLength _expandedFlowHeight = new(3, GridUnitType.Star);
     private bool _previewCollapsed;

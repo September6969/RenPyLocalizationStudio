@@ -17,7 +17,6 @@ public sealed class MainViewModel : ObservableObject, IRecipient<NavigateToSourc
     private WorkspaceViewModelBase? _currentWorkspace;
     private string _accentColor;
     private Brush _accentPreviewBrush;
-    private string? _restoredPositionKey;
     private Task<bool>? _shutdownTask;
 
     public MainViewModel(
@@ -48,7 +47,6 @@ public sealed class MainViewModel : ObservableObject, IRecipient<NavigateToSourc
         MoveNextTranslationCommand = translation.MoveNextCommand;
         messenger.Register(this);
         session.PropertyChanged += OnSessionPropertyChanged;
-        session.SnapshotChanged += OnSessionSnapshotChanged;
         translation.PositionChanged += OnTranslationPositionChanged;
     }
 
@@ -102,7 +100,6 @@ public sealed class MainViewModel : ObservableObject, IRecipient<NavigateToSourc
         if (_disposed) return;
         _disposed = true;
         Session.PropertyChanged -= OnSessionPropertyChanged;
-        Session.SnapshotChanged -= OnSessionSnapshotChanged;
         TranslationWorkspace.PositionChanged -= OnTranslationPositionChanged;
         _messenger.UnregisterAll(this);
         TranslationWorkspace.Dispose();
@@ -129,22 +126,9 @@ public sealed class MainViewModel : ObservableObject, IRecipient<NavigateToSourc
     private void OnSessionPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs args)
     {
         if (args.PropertyName == nameof(ProjectSessionViewModel.ProjectName)) OnPropertyChanged(nameof(WindowTitle));
-        if (args.PropertyName is nameof(ProjectSessionViewModel.ProjectPath) or nameof(ProjectSessionViewModel.Language))
-        {
-            _restoredPositionKey = null;
-        }
         if (args.PropertyName == nameof(ProjectSessionViewModel.AutoSaveEnabled) &&
             !string.IsNullOrWhiteSpace(Session.ProjectPath))
             ScheduleSettingsPersistence();
-    }
-
-    private void OnSessionSnapshotChanged(object? sender, ProjectSnapshot? snapshot)
-    {
-        if (snapshot is null) return;
-        var key = $"{Session.ProjectPath}\u001f{Session.Language}";
-        if (string.Equals(_restoredPositionKey, key, StringComparison.OrdinalIgnoreCase)) return;
-        _restoredPositionKey = key;
-        TranslationWorkspace.RestorePosition(Session.LastTranslationPosition);
     }
 
     private void OnTranslationPositionChanged(object? sender, EventArgs args)
@@ -157,10 +141,11 @@ public sealed class MainViewModel : ObservableObject, IRecipient<NavigateToSourc
     }
 
     private void ScheduleSettingsPersistence() =>
-        _taskCoordinator.StartLatestAfterDelay(
-            "settings-save",
-            TimeSpan.FromMilliseconds(180),
-            Session.PersistSettingsAsync);
+        _ = _taskCoordinator.RunLatestOnContextAsync("settings-save", async token =>
+        {
+            await Task.Delay(180, token);
+            await Session.PersistSettingsAsync(token);
+        });
 
     private async Task<bool> ShutdownCoreAsync(CancellationToken cancellationToken)
     {
@@ -172,6 +157,7 @@ public sealed class MainViewModel : ObservableObject, IRecipient<NavigateToSourc
         await _taskCoordinator.CancelAsync("settings-save", cancellationToken);
         var saved = await Session.FlushAutoSaveAsync(cancellationToken);
         if (!saved && !Session.ConfirmDiscardUnsavedChanges("关闭程序")) return false;
+        TranslationWorkspace.RememberWorkspaceState();
         await Session.PersistSettingsAsync(cancellationToken);
         await _taskCoordinator.CancelAsync("workspace-activation", cancellationToken);
         await TranslationWorkspace.StopPreviewAsync(cancellationToken);

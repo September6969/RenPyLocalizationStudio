@@ -8,14 +8,21 @@ public sealed record TranslationScopeOption(string Id, string Label);
 
 internal sealed class TranslationProgressScopes
 {
-    private readonly Dictionary<ContentItem, HashSet<string>> _scopes = new();
+    private readonly Dictionary<object, HashSet<string>> _scopes;
+    private readonly ProjectSnapshot? _snapshot;
+    private readonly Dictionary<string, TranslationScopeOption> _options;
+    private readonly Dictionary<string, FlowNode[]> _labelsByPath;
+    private static object ScopeKey(ContentItem item) => (object?)item.Node ?? (object?)item.SharedString ?? item.Unit ?? (object)item;
     public IReadOnlyList<TranslationScopeOption> Options { get; }
 
-    public TranslationProgressScopes(ProjectSnapshot? snapshot, IReadOnlyList<ContentItem> items)
+    public TranslationProgressScopes(ProjectSnapshot? snapshot, IReadOnlyList<ContentItem> items, TranslationProgressScopes? previous = null)
     {
-        var options = new Dictionary<string, TranslationScopeOption>(StringComparer.OrdinalIgnoreCase);
+        _snapshot = snapshot;
+        var reuse = snapshot is not null && ReferenceEquals(snapshot, previous?._snapshot);
+        _scopes = reuse ? previous!._scopes : new();
+        var options = _options = reuse ? previous!._options : new(StringComparer.OrdinalIgnoreCase);
         // 范围选项来自完整项目，避免修复某文件的最后一个问题后悄悄跳回全部文件。
-        if (snapshot is not null)
+        if (snapshot is not null && !reuse)
         {
             foreach (var source in snapshot.Sources)
                 options.TryAdd("file:" + source.RelativePath, new TranslationScopeOption("file:" + source.RelativePath, "文件 · " + source.RelativePath));
@@ -27,11 +34,12 @@ internal sealed class TranslationProgressScopes
                 options.TryAdd("file:" + path, new TranslationScopeOption("file:" + path, "文件 · " + path));
             }
         }
-        var labelsByPath = snapshot?.Graph.Labels.Values.GroupBy(node => node.Region.RelativePath, StringComparer.OrdinalIgnoreCase)
+        var labelsByPath = _labelsByPath = reuse ? previous!._labelsByPath : snapshot?.Graph.Labels.Values.GroupBy(node => node.Region.RelativePath, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(group => group.Key, group => group.OrderBy(node => node.Region.StartLine).ToArray(), StringComparer.OrdinalIgnoreCase)
             ?? new Dictionary<string, FlowNode[]>(StringComparer.OrdinalIgnoreCase);
         foreach (var item in items)
         {
+            if (_scopes.ContainsKey(ScopeKey(item))) continue;
             var scopes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var (path, line) in Locations(item, snapshot?.Language ?? string.Empty))
             {
@@ -54,13 +62,13 @@ internal sealed class TranslationProgressScopes
                 scopes.Add(labelId);
                 options.TryAdd(labelId, new TranslationScopeOption(labelId, "Label · " + label.LabelName));
             }
-            _scopes[item] = scopes;
+            _scopes[ScopeKey(item)] = scopes;
         }
         Options = [new("all", "全部文件 / Label"), .. options.Values.OrderBy(option => option.Label, StringComparer.Ordinal)];
     }
 
     public bool Contains(ContentItem item, string scope) => scope == "all" ||
-        (_scopes.TryGetValue(item, out var scopes) && scopes.Contains(scope));
+        (_scopes.TryGetValue(ScopeKey(item), out var scopes) && scopes.Contains(scope));
 
     private static IEnumerable<(string Path, int Line)> Locations(ContentItem item, string language)
     {
