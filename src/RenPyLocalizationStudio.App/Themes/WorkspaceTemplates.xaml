@@ -20,4 +20,7 @@
     <DataTemplate DataType="{x:Type vm:ReplacementRulesDocumentViewModel}"><views:ReplacementRulesDocumentView /></DataTemplate>
     <DataTemplate DataType="{x:Type vm:ZzzDocumentViewModel}"><views:ZzzDocumentView /></DataTemplate>
     <DataTemplate DataType="{x:Type vm:DiffDocumentViewModel}"><views:DiffDocumentView /></DataTemplate>
+    <DataTemplate x:Key="ViewModeLabelTemplate"><TextBlock><TextBlock.Style><Style TargetType="TextBlock"><Setter Property="Text" Value="{Binding}"/><Style.Triggers>
+        <DataTrigger Binding="{Binding}" Value="Flow"><Setter Property="Text" Value="剧情流"/></DataTrigger><DataTrigger Binding="{Binding}" Value="Strings"><Setter Property="Text" Value="字符串"/></DataTrigger><DataTrigger Binding="{Binding}" Value="Unbound"><Setter Property="Text" Value="未绑定"/></DataTrigger><DataTrigger Binding="{Binding}" Value="Bookmarks"><Setter Property="Text" Value="书签"/></DataTrigger><DataTrigger Binding="{Binding}" Value="Quality"><Setter Property="Text" Value="质量检查"/></DataTrigger>
+    </Style.Triggers></Style></TextBlock.Style></TextBlock></DataTemplate>
 </ResourceDictionary>

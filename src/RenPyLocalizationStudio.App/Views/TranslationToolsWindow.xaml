@@ -4,7 +4,6 @@
  Background="{DynamicResource BackgroundLevel1}" Foreground="{DynamicResource TextPrimaryBrush}">
  <Window.Resources>
   <Style TargetType="Button" BasedOn="{StaticResource GhostButtonStyle}"><Setter Property="Margin" Value="0,2,8,2"/><Setter Property="Padding" Value="12,6"/></Style>
-  <Style TargetType="DataGrid"><Setter Property="AutoGenerateColumns" Value="False"/><Setter Property="CanUserAddRows" Value="False"/><Setter Property="EnableRowVirtualization" Value="True"/><Setter Property="RowHeight" Value="32"/><Setter Property="Background" Value="{DynamicResource BackgroundLevel1}"/><Setter Property="RowBackground" Value="{DynamicResource BackgroundLevel1}"/><Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}"/></Style>
   <Style x:Key="CellText" TargetType="TextBlock"><Setter Property="TextTrimming" Value="CharacterEllipsis"/><Setter Property="ToolTip" Value="{Binding Text, RelativeSource={RelativeSource Self}}"/><Setter Property="Padding" Value="4,5"/></Style>
  </Window.Resources>
  <Grid Margin="16"><Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>

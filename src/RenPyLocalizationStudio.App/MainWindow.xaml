@@ -5,7 +5,7 @@
         Title="{Binding WindowTitle}" Width="1500" Height="880" MinWidth="720" MinHeight="560"
         WindowStyle="None" ResizeMode="CanResize" AllowsTransparency="False"
         Background="{DynamicResource BackgroundLevel0}" Foreground="{DynamicResource TextPrimaryBrush}"
-        BorderThickness="1" BorderBrush="{DynamicResource BackgroundLevel1}"
+        BorderThickness="1" BorderBrush="{DynamicResource BorderDefaultBrush}"
         FontFamily="{StaticResource StudioUiFontFamily}"
         TextOptions.TextFormattingMode="Display"
         TextOptions.TextRenderingMode="ClearType"
@@ -37,10 +37,10 @@
             </StackPanel>
             <Grid Grid.Column="1" Margin="10,4,16,4" shell:WindowChrome.IsHitTestVisibleInChrome="True">
                 <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                <DockPanel LastChildFill="True" VerticalAlignment="Center">
                     <TextBlock FontFamily="Segoe Fluent Icons" FontSize="15" Text="&#xE838;" Foreground="{DynamicResource TextMutedBrush}" VerticalAlignment="Center" Margin="0,0,8,0" />
                     <TextBlock Text="{Binding Session.ProjectName}" FontSize="13" FontWeight="SemiBold" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" ToolTip="{Binding Session.ProjectPath}" />
-                </StackPanel>
+                </DockPanel>
                 <Button Grid.Column="1" Content="更改..." Command="{Binding Session.ChooseProjectCommand}"
                         Style="{StaticResource GhostButtonStyle}" Margin="12,0,0,0" Padding="8,4" />
             </Grid>
@@ -52,52 +52,44 @@
             </StackPanel>
             <Grid Grid.Column="3" Margin="0,4,10,4" shell:WindowChrome.IsHitTestVisibleInChrome="True">
                 <StackPanel Orientation="Horizontal">
-                    <ToggleButton x:Name="MoreButton" Width="34" Height="30" ToolTip="更多设置"
-                                  Foreground="{DynamicResource TextMutedBrush}" Background="Transparent" BorderThickness="0"
-                                  FontFamily="Segoe Fluent Icons" FontSize="15" Content="&#xE712;" />
-                    <Border Width="1" Height="18" Background="{DynamicResource BackgroundLevel2}" Margin="8,0" VerticalAlignment="Center" />
-                    <Button Content="分析" Command="{Binding Session.AnalyzeCommand}" Style="{StaticResource GhostButtonStyle}" Margin="4,0,0,0" />
-                    <Button Content="保存" ToolTip="保存译文 · Ctrl+S" Command="{Binding Session.SaveCommand}" Style="{StaticResource PrimaryButtonStyle}" Margin="8,0,0,0" />
-                    <Button Content="刷新注释" Command="{Binding Session.SaveWithAnnotationsCommand}" Style="{StaticResource GhostButtonStyle}"
-                            Margin="4,0,0,0" ToolTip="保存并刷新流程注释" />
-                    <Button Content="取消" Command="{Binding Tasks.CancelCommand}" Style="{StaticResource GhostButtonStyle}" Margin="4,0,0,0" />
-                </StackPanel>
-                <Popup Placement="Bottom" PlacementTarget="{Binding ElementName=MoreButton}" IsOpen="{Binding IsChecked, ElementName=MoreButton}"
-                       StaysOpen="False" AllowsTransparency="True">
-                    <Border Background="{DynamicResource BackgroundLevel2}" Padding="16" CornerRadius="6"
-                            BorderBrush="{DynamicResource BackgroundLevel1}" BorderThickness="1">
-                        <StackPanel Width="180">
-                            <TextBlock Text="外观设置" FontWeight="SemiBold" FontSize="13" Margin="0,0,0,12" />
-                            <TextBlock Text="强调色" FontSize="11" Foreground="{DynamicResource TextSubtleBrush}" Margin="0,0,0,6" />
-                            <WrapPanel Margin="0,0,0,8">
-                                <Button Style="{StaticResource PresetColorButtonStyle}" Background="#D16BA5" Click="PresetColor_Click" Tag="#D16BA5" ToolTip="粉红" />
-                                <Button Style="{StaticResource PresetColorButtonStyle}" Background="#9B59B6" Click="PresetColor_Click" Tag="#9B59B6" ToolTip="紫色" />
-                                <Button Style="{StaticResource PresetColorButtonStyle}" Background="#3498DB" Click="PresetColor_Click" Tag="#3498DB" ToolTip="经典蓝" />
-                                <Button Style="{StaticResource PresetColorButtonStyle}" Background="#1ABC9C" Click="PresetColor_Click" Tag="#1ABC9C" ToolTip="青绿" />
-                                <Button Style="{StaticResource PresetColorButtonStyle}" Background="#2ECC71" Click="PresetColor_Click" Tag="#2ECC71" ToolTip="翠绿" />
-                                <Button Style="{StaticResource PresetColorButtonStyle}" Background="#E67E22" Click="PresetColor_Click" Tag="#E67E22" ToolTip="活力橙" />
-                                <Button Style="{StaticResource PresetColorButtonStyle}" Background="#E74C3C" Click="PresetColor_Click" Tag="#E74C3C" ToolTip="珊瑚红" />
-                                <Button Style="{StaticResource PresetColorButtonStyle}" Background="#F1C40F" Click="PresetColor_Click" Tag="#F1C40F" ToolTip="金黄" />
-                            </WrapPanel>
-                            <CheckBox Content="编辑后自动保存" IsChecked="{Binding Session.AutoSaveEnabled, Mode=TwoWay}"
-                                      Foreground="{DynamicResource TextPrimaryBrush}" FontSize="12" Margin="0,2,0,12"
-                                      ToolTip="译文停止输入约 0.9 秒后自动写入，存在结构警告时需手动确认。" />
-                            <Border Height="1" Background="{DynamicResource BackgroundLevel1}" Margin="0,0,0,10" />
-                            <TextBlock Text="保存" FontSize="11" Foreground="{DynamicResource TextSubtleBrush}" Margin="0,0,0,4" />
-                            <Button Content="强制覆盖外部修改" Command="{Binding Session.ForceSaveCommand}"
-                                    Style="{StaticResource GhostButtonStyle}" HorizontalAlignment="Left" Padding="8,4"
-                                    ToolTip="忽略外部修改哈希冲突并保存；会先要求确认并保留 .rls.bak 备份。" />
-                            <Grid>
-                                <Grid.ColumnDefinitions><ColumnDefinition Width="24"/><ColumnDefinition Width="*"/><ColumnDefinition Width="32"/></Grid.ColumnDefinitions>
-                                <Border Width="16" Height="16" CornerRadius="3" Background="{Binding AccentPreviewBrush}"
-                                        HorizontalAlignment="Left" VerticalAlignment="Center" />
-                                <TextBox Grid.Column="1" Text="{Binding AccentColor, UpdateSourceTrigger=PropertyChanged}" Padding="4"
-                                         AutomationProperties.Name="自定义强调色" />
-                                <Button Grid.Column="2" Content="&#xE73E;" FontFamily="Segoe Fluent Icons" Command="{Binding ApplyAccentCommand}"
-                                        CommandParameter="{Binding AccentColor}" Style="{StaticResource GhostButtonStyle}" Padding="8,4" ToolTip="应用强调色" />
-                            </Grid>
-                        </StackPanel>
+                    <Button Command="{Binding Session.AnalyzeCommand}" Style="{StaticResource GhostButtonStyle}" ToolTip="分析当前项目" AutomationProperties.Name="分析项目"><StackPanel Orientation="Horizontal"><TextBlock FontFamily="Segoe Fluent Icons" Text="&#xE9D9;" Margin="0,0,6,0"/><TextBlock Text="分析"/></StackPanel></Button>
+                    <Button Command="{Binding Session.SaveCommand}" Style="{StaticResource PrimaryButtonStyle}" Margin="4,0,0,0" ToolTip="保存译文 · Ctrl+S" AutomationProperties.Name="保存译文"><StackPanel Orientation="Horizontal"><TextBlock FontFamily="Segoe Fluent Icons" Text="&#xE74E;" Margin="0,0,6,0"/><TextBlock Text="保存"/><TextBlock Text=" •" Visibility="{Binding Session.HasUnsavedChanges, Converter={StaticResource BooleanToVisibilityConverter}}"/></StackPanel></Button>
+                    <Button x:Name="SaveMenuButton" Content="&#xE70D;" FontFamily="Segoe Fluent Icons" Style="{StaticResource GhostButtonStyle}" Padding="6,4" Click="OpenMenu_Click" AutomationProperties.Name="更多保存操作" ToolTip="更多保存操作">
+                        <Button.ContextMenu><ContextMenu DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
+                            <MenuItem Header="保存并刷新流程注释" Command="{Binding Session.SaveWithAnnotationsCommand}"/>
+                            <Separator/>
+                            <MenuItem Header="强制覆盖外部修改…" Command="{Binding Session.ForceSaveCommand}" Foreground="{DynamicResource SemanticErrorBrush}" ToolTip="需再次确认，并保留 .rls.bak 备份"/>
+                        </ContextMenu></Button.ContextMenu>
+                    </Button>
+                    <Border x:Name="TaskCapsule" CornerRadius="12" Background="{DynamicResource BrandAccentSoftBrush}" Margin="4,0" Padding="6,0" Visibility="{Binding Tasks.IsBusy, Converter={StaticResource BooleanToVisibilityConverter}}">
+                        <StackPanel Orientation="Horizontal"><TextBlock Text="处理中" VerticalAlignment="Center" ToolTip="{Binding Tasks.StatusMessage}"/><Button Content="&#xE711;" FontFamily="Segoe Fluent Icons" Command="{Binding Tasks.CancelCommand}" Style="{StaticResource GhostButtonStyle}" Padding="6,4" AutomationProperties.Name="取消当前任务" ToolTip="取消当前任务"/></StackPanel>
                     </Border>
+                    <ToggleButton x:Name="MoreButton" Width="32" Style="{StaticResource IconToggleStyle}" FontFamily="Segoe Fluent Icons" FontSize="15" Content="&#xE713;" AutomationProperties.Name="设置" ToolTip="设置"/>
+                </StackPanel>
+                <Popup Placement="Bottom" PlacementTarget="{Binding ElementName=MoreButton}" IsOpen="{Binding IsChecked, ElementName=MoreButton, Mode=TwoWay}" StaysOpen="False" AllowsTransparency="True">
+                    <Border Style="{StaticResource FlyoutBorderStyle}"><StackPanel Width="224">
+                        <TextBlock Text="设置" Style="{StaticResource SubtitleTextStyle}" Margin="0,0,0,12"/>
+                        <TextBlock Text="强调色" Style="{StaticResource CaptionTextStyle}" Margin="0,0,0,8"/>
+                        <WrapPanel>
+                            <Button Style="{StaticResource PresetColorButtonStyle}" Background="#D16BA5" Click="PresetColor_Click" Tag="#D16BA5" ToolTip="粉红" AutomationProperties.Name="粉红强调色"/>
+                            <Button Style="{StaticResource PresetColorButtonStyle}" Background="#9B59B6" Click="PresetColor_Click" Tag="#9B59B6" ToolTip="紫色" AutomationProperties.Name="紫色强调色"/>
+                            <Button Style="{StaticResource PresetColorButtonStyle}" Background="#3498DB" Click="PresetColor_Click" Tag="#3498DB" ToolTip="经典蓝" AutomationProperties.Name="蓝色强调色"/>
+                            <Button Style="{StaticResource PresetColorButtonStyle}" Background="#1ABC9C" Click="PresetColor_Click" Tag="#1ABC9C" ToolTip="青绿" AutomationProperties.Name="青绿强调色"/>
+                            <Button Style="{StaticResource PresetColorButtonStyle}" Background="#2ECC71" Click="PresetColor_Click" Tag="#2ECC71" ToolTip="翠绿" AutomationProperties.Name="翠绿强调色"/>
+                            <Button Style="{StaticResource PresetColorButtonStyle}" Background="#E67E22" Click="PresetColor_Click" Tag="#E67E22" ToolTip="活力橙" AutomationProperties.Name="橙色强调色"/>
+                            <Button Style="{StaticResource PresetColorButtonStyle}" Background="#E74C3C" Click="PresetColor_Click" Tag="#E74C3C" ToolTip="珊瑚红" AutomationProperties.Name="红色强调色"/>
+                            <Button Style="{StaticResource PresetColorButtonStyle}" Background="#F1C40F" Click="PresetColor_Click" Tag="#F1C40F" ToolTip="金黄" AutomationProperties.Name="金黄强调色"/>
+                        </WrapPanel>
+                        <TextBlock Text="自定义颜色（#RRGGBB）" Style="{StaticResource CaptionTextStyle}" Margin="0,4,0,6"/>
+                        <Grid Margin="0,0,0,12"><Grid.ColumnDefinitions><ColumnDefinition Width="24"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                            <Border Width="16" Height="16" CornerRadius="3" Background="{Binding AccentPreviewBrush}"/>
+                            <TextBox Grid.Column="1" Style="{StaticResource BoxedTextBoxStyle}" Text="{Binding AccentColor, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="自定义强调色"/>
+                            <Button Grid.Column="2" Content="应用" Command="{Binding ApplyAccentCommand}" CommandParameter="{Binding AccentColor}" Style="{StaticResource GhostButtonStyle}" Padding="8,4"/>
+                        </Grid>
+                        <Border Height="1" Background="{DynamicResource BorderSubtleBrush}" Margin="0,0,0,12"/>
+                        <TextBlock Text="编辑" Style="{StaticResource CaptionTextStyle}" Margin="0,0,0,8"/>
+                        <CheckBox Content="编辑后自动保存" IsChecked="{Binding Session.AutoSaveEnabled, Mode=TwoWay}" ToolTip="译文停止输入约 0.9 秒后自动写入，结构警告仍需确认。"/>
+                    </StackPanel></Border>
                 </Popup>
             </Grid>
             <StackPanel Grid.Column="4" Orientation="Horizontal" shell:WindowChrome.IsHitTestVisibleInChrome="True">
@@ -112,11 +104,11 @@
 
         <Grid Grid.Row="1">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="48"/><ColumnDefinition Width="Auto"/><ColumnDefinition x:Name="SidebarDividerColumn" Width="1"/>
-                <ColumnDefinition Width="*"/><ColumnDefinition x:Name="InspectorDividerColumn" Width="1"/><ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="48"/><ColumnDefinition x:Name="SidebarColumn" Width="260" MaxWidth="420"/><ColumnDefinition x:Name="SidebarDividerColumn" Width="6"/>
+                <ColumnDefinition x:Name="MainColumn" Width="*" MinWidth="360"/><ColumnDefinition x:Name="InspectorDividerColumn" Width="6"/><ColumnDefinition x:Name="InspectorColumn" Width="360" MaxWidth="560"/>
             </Grid.ColumnDefinitions>
             <Grid Grid.Column="0" Background="{DynamicResource BackgroundLevel1}">
-                <Border BorderThickness="0,0,1,0" BorderBrush="{DynamicResource BackgroundLevel2}" />
+                <Border BorderThickness="0,0,1,0" BorderBrush="{DynamicResource BorderSubtleBrush}" />
                 <Canvas IsHitTestVisible="False" ClipToBounds="True">
                     <Grid x:Name="ActivitySelectionIndicator" Width="48" Height="46" Opacity="0">
                         <Grid.RenderTransform>
@@ -136,19 +128,19 @@
                                 <TextBlock Text="{Binding Glyph}" FontFamily="Segoe Fluent Icons" FontSize="18" HorizontalAlignment="Center" VerticalAlignment="Center" />
                                 <Border Background="{DynamicResource SemanticErrorBrush}" CornerRadius="8" HorizontalAlignment="Right" VerticalAlignment="Top"
                                         MinWidth="16" Height="16" Margin="0,-7,-9,0" Visibility="{Binding HasBadge, Converter={StaticResource BooleanToVisibilityConverter}}">
-                                    <TextBlock Text="{Binding Badge}" FontSize="9" HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="White" Margin="3,0" />
+                                    <TextBlock Text="{Binding Badge}" FontSize="9" HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="{DynamicResource BackgroundLevel0}" Margin="3,0" />
                                 </Border>
                             </Grid>
                         </DataTemplate>
                     </ListBox.ItemTemplate>
                 </ListBox>
             </Grid>
-            <ContentControl x:Name="SidebarHost" Grid.Column="1" Width="260" Content="{Binding CurrentWorkspace.SidebarContent}"
+            <ContentControl x:Name="SidebarHost" Grid.Column="1" Content="{Binding CurrentWorkspace.SidebarContent}"
                             Background="{DynamicResource BackgroundLevel1}" />
-            <Border Grid.Column="2" Background="{DynamicResource BackgroundLevel2}" />
+            <GridSplitter x:Name="SidebarSplitter" Grid.Column="2" Style="{StaticResource ColumnGridSplitterStyle}" DragCompleted="SidebarSplitter_DragCompleted" AutomationProperties.Name="调整导航宽度"/>
             <ContentControl x:Name="MainHost" Grid.Column="3" Content="{Binding CurrentWorkspace.MainContent}" Background="{DynamicResource BackgroundLevel0}" />
-            <Border Grid.Column="4" Background="{DynamicResource BackgroundLevel2}" />
-            <ContentControl x:Name="InspectorHost" IsVisibleChanged="InspectorHost_IsVisibleChanged" Grid.Column="5" Width="360" Content="{Binding CurrentWorkspace.InspectorContent}"
+            <GridSplitter x:Name="InspectorSplitter" Grid.Column="4" Style="{StaticResource ColumnGridSplitterStyle}" DragCompleted="InspectorSplitter_DragCompleted" AutomationProperties.Name="调整检查器宽度"/>
+            <ContentControl x:Name="InspectorHost" IsVisibleChanged="InspectorHost_IsVisibleChanged" Grid.Column="5" Content="{Binding CurrentWorkspace.InspectorContent}"
                             Background="{DynamicResource BackgroundLevel1}"
                             Visibility="{Binding CurrentWorkspace.IsInspectorVisible, Converter={StaticResource BooleanToVisibilityConverter}}" />
         </Grid>
@@ -160,8 +152,9 @@
             <ProgressBar Grid.Column="1" Height="3" VerticalAlignment="Bottom" BorderThickness="0" Background="Transparent"
                          Foreground="{DynamicResource BrandAccentBrush}" IsIndeterminate="{Binding Tasks.IsBusy}"
                          AutomationProperties.Name="当前任务进度" />
-            <TextBlock Grid.Column="2" Text="Alt+↑ / Alt+↓ 切换译文 · Alt+← / Alt+→ 保留编辑器操作" Margin="12,0" VerticalAlignment="Center" FontSize="11"
-                       Foreground="{DynamicResource TextSubtleBrush}" />
+            <Button Grid.Column="2" Content="快捷键" Style="{StaticResource GhostButtonStyle}" Padding="12,2" Click="OpenMenu_Click" AutomationProperties.Name="快捷键速查表">
+                <Button.ContextMenu><ContextMenu><MenuItem Header="Ctrl+S　保存译文" IsEnabled="False"/><MenuItem Header="Ctrl+F　搜索并选中关键词" IsEnabled="False"/><MenuItem Header="F8　下一条待译" IsEnabled="False"/><MenuItem Header="Alt+↑ / ↓　切换可编辑译文" IsEnabled="False"/><MenuItem Header="Esc　清除搜索词" IsEnabled="False"/><MenuItem Header="Ctrl+Z　撤销编辑器输入" IsEnabled="False"/></ContextMenu></Button.ContextMenu>
+            </Button>
         </Grid>
     </Grid>
 </Window>

@@ -48,8 +48,8 @@ public sealed class TranslationInteractionTests
     }
 
     [Theory]
-    [InlineData(720, true, 0, 300)]
-    [InlineData(900, true, 0, 300)]
+    [InlineData(720, true, 0, 306)]
+    [InlineData(900, true, 0, 360)]
     [InlineData(900, false, 260, 0)]
     [InlineData(1180, true, 260, 360)]
     [InlineData(1500, false, 260, 0)]

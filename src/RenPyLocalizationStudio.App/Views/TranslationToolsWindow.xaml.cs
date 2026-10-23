@@ -13,7 +13,8 @@ public partial class TranslationToolsWindow : Window
     private readonly TranslationToolsViewModel _model;
     public TranslationToolsWindow(TranslationWorkspaceViewModel workspace, int tab = 0)
     {
-        InitializeComponent(); DataContext = _model = new(workspace); Tabs.SelectedIndex = tab;
+        InitializeComponent();
+        SourceInitialized += (_, _) => Services.WindowThemeHelper.ApplyDarkChrome(this); DataContext = _model = new(workspace); Tabs.SelectedIndex = tab;
         Closed += (_, _) => _model.Dispose();
     }
     private void Close_Click(object sender, RoutedEventArgs e) => Close();

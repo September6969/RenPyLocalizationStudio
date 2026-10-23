@@ -20,8 +20,7 @@ public partial class MainWindow : Window
     private const uint MonitorDefaultToNearest = 0x00000002;
     private readonly MainViewModel _viewModel;
     private HwndSource? _source;
-    private bool? _sidebarExpanded;
-    private double? _inspectorWidth;
+
     private bool _shutdownInProgress;
     private bool _shutdownComplete;
 
@@ -33,6 +32,9 @@ public partial class MainWindow : Window
         Loaded += OnLoaded;
         SourceInitialized += OnSourceInitialized;
         _viewModel.PropertyChanged += OnViewModelPropertyChanged;
+        _viewModel.Session.PropertyChanged += OnSessionLayoutChanged;
+        SidebarSplitter.PreviewKeyUp += (_, e) => { if (e.Key is Key.Left or Key.Right) SidebarSplitter_DragCompleted(SidebarSplitter, new DragCompletedEventArgs(0, 0, false)); };
+        InspectorSplitter.PreviewKeyUp += (_, e) => { if (e.Key is Key.Left or Key.Right) InspectorSplitter_DragCompleted(InspectorSplitter, new DragCompletedEventArgs(0, 0, false)); };
     }
 
     private void OnViewModelPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs args)
@@ -56,6 +58,7 @@ public partial class MainWindow : Window
     private static void AnimateSlideIn(FrameworkElement element, double fromX = 0, double fromY = 0, double durationMs = 180)
     {
         if (element == null) return;
+        if (!SystemParameters.ClientAreaAnimation) { element.BeginAnimation(UIElement.OpacityProperty, null); element.Opacity = 1; element.RenderTransform = Transform.Identity; return; }
         var tt = new System.Windows.Media.TranslateTransform(fromX, fromY);
         element.RenderTransform = tt;
         element.Opacity = 0;
@@ -83,6 +86,7 @@ public partial class MainWindow : Window
     private void UpdateActivityIndicator(bool animate = true)
     {
         if (ActivityBarList == null || ActivitySelectionIndicator == null) return;
+        animate &= SystemParameters.ClientAreaAnimation;
         int index = ActivityBarList.SelectedIndex;
         if (index < 0)
         {
@@ -96,7 +100,7 @@ public partial class MainWindow : Window
             : container.TranslatePoint(new Point(0, 0), ActivityBarList).Y +
               Math.Max(0, (container.ActualHeight - ActivitySelectionIndicator.Height) / 2d);
 
-        if (ActivitySelectionIndicator.Opacity == 0)
+        if (ActivitySelectionIndicator.Opacity == 0 && SystemParameters.ClientAreaAnimation)
         {
             IndicatorTransform.Y = targetY;
             var fadeAnim = new System.Windows.Media.Animation.DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(180))
@@ -200,6 +204,7 @@ public partial class MainWindow : Window
     private void OnWindowClosed(object? sender, EventArgs e)
     {
         _viewModel.PropertyChanged -= OnViewModelPropertyChanged;
+        _viewModel.Session.PropertyChanged -= OnSessionLayoutChanged;
         _viewModel.Dispose();
         _source?.RemoveHook(WindowMessageHook);
         _source = null;
@@ -240,42 +245,36 @@ public partial class MainWindow : Window
 
     private void OnWindowSizeChanged(object sender, SizeChangedEventArgs e) => UpdateResponsiveLayout(e.NewSize.Width);
 
+    private void OnSessionLayoutChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(ProjectSessionViewModel.UiLayout)) UpdateResponsiveLayout(ActualWidth);
+    }
+    private void SidebarSplitter_DragCompleted(object sender, DragCompletedEventArgs e)
+    {
+        if (SidebarColumn.ActualWidth <= 0) return;
+        _viewModel.Session.UpdateUiLayout(_viewModel.Session.UiLayout with { SidebarWidth = SidebarColumn.ActualWidth });
+    }
+    private void InspectorSplitter_DragCompleted(object sender, DragCompletedEventArgs e)
+    {
+        if (InspectorColumn.ActualWidth <= 0) return;
+        _viewModel.Session.UpdateUiLayout(_viewModel.Session.UiLayout with { InspectorWidth = InspectorColumn.ActualWidth });
+    }
     private void UpdateResponsiveLayout(double width)
     {
-        if (!IsInitialized) return;
-        var layout = WorkspacePaneLayout.Calculate(width, _viewModel.CurrentWorkspace?.IsInspectorVisible == true);
-        var showSidebar = layout.SidebarWidth > 0;
-        var showInspector = layout.InspectorWidth > 0;
-        var targetSidebarWidth = layout.SidebarWidth;
-        var targetInspectorWidth = layout.InspectorWidth;
-
-        if (_sidebarExpanded != showSidebar)
-        {
-            _sidebarExpanded = showSidebar;
-            if (IsLoaded) AnimateWidth(SidebarHost, targetSidebarWidth);
-            else SidebarHost.Width = targetSidebarWidth;
-        }
-        if (_inspectorWidth != targetInspectorWidth)
-        {
-            _inspectorWidth = targetInspectorWidth;
-            if (IsLoaded) AnimateWidth(InspectorHost, targetInspectorWidth);
-            else InspectorHost.Width = targetInspectorWidth;
-        }
-
-        SidebarDividerColumn.Width = showSidebar ? new GridLength(1) : new GridLength(0);
-        InspectorDividerColumn.Width = showInspector ? new GridLength(1) : new GridLength(0);
-
-        FullProductName.Visibility = width < 820 ? Visibility.Collapsed : Visibility.Visible;
-        if (LanguagePanel != null) LanguagePanel.Visibility = width < 750 ? Visibility.Collapsed : Visibility.Visible;
-    }
-
-    private static void AnimateWidth(FrameworkElement element, double targetWidth, double durationMs = 180)
-    {
-        var anim = new System.Windows.Media.Animation.DoubleAnimation(targetWidth, TimeSpan.FromMilliseconds(durationMs))
-        {
-            EasingFunction = SharedEaseOut
-        };
-        element.BeginAnimation(FrameworkElement.WidthProperty, anim);
+        if (!IsInitialized || SidebarColumn is null || InspectorColumn is null || width <= 0) return;
+        MainColumn.MinWidth = width < 900 ? 360 : 420;
+        var preferences = _viewModel.Session.UiLayout;
+        var layout = WorkspacePaneLayout.Calculate(width, _viewModel.CurrentWorkspace?.IsInspectorVisible == true, preferences.SidebarWidth, preferences.InspectorWidth);
+        SidebarColumn.MinWidth = layout.SidebarWidth > 0 ? WorkspacePaneLayout.SidebarMin : 0;
+        InspectorColumn.MinWidth = layout.InspectorWidth > 0 ? WorkspacePaneLayout.InspectorMin : 0;
+        SidebarColumn.Width = new GridLength(layout.SidebarWidth);
+        InspectorColumn.Width = new GridLength(layout.InspectorWidth);
+        SidebarDividerColumn.Width = new GridLength(layout.SidebarWidth > 0 ? 6 : 0);
+        InspectorDividerColumn.Width = new GridLength(layout.InspectorWidth > 0 ? 6 : 0);
+        SidebarHost.Visibility = SidebarSplitter.Visibility = layout.SidebarWidth > 0 ? Visibility.Visible : Visibility.Collapsed;
+        InspectorSplitter.Visibility = layout.InspectorWidth > 0 ? Visibility.Visible : Visibility.Collapsed;
+        FullProductName.Visibility = width < 1180 ? Visibility.Collapsed : Visibility.Visible;
+        if (LanguagePanel != null) LanguagePanel.Visibility = width < 900 ? Visibility.Collapsed : Visibility.Visible;
     }
 
     private void OnWindowStateChanged(object? sender, EventArgs e) => UpdateMaximizePresentation();
@@ -372,21 +371,14 @@ public partial class MainWindow : Window
         _ => null
     };
 
-    private void TryEnableMica()
+    private void TryEnableMica() => Services.WindowThemeHelper.ApplyDarkChrome(this, mica: true);
+
+    private void OpenMenu_Click(object sender, RoutedEventArgs e)
     {
-        if (!OperatingSystem.IsWindowsVersionAtLeast(10, 0, 22621)) return;
-        try
-        {
-            var backdrop = 2;
-            var dark = 1;
-            var handle = new WindowInteropHelper(this).Handle;
-            _ = DwmSetWindowAttribute(handle, 38, ref backdrop, sizeof(int));
-            _ = DwmSetWindowAttribute(handle, 20, ref dark, sizeof(int));
-        }
-        catch (Exception)
-        {
-            // Mica 仅为渐进增强，失败时继续使用纯色背景。
-        }
+        if (sender is not Button { ContextMenu: { } menu } button) return;
+        menu.PlacementTarget = button;
+        menu.Placement = PlacementMode.Bottom;
+        menu.IsOpen = true;
     }
 
     private void PresetColor_Click(object sender, RoutedEventArgs e)
@@ -399,9 +391,6 @@ public partial class MainWindow : Window
             }
         }
     }
-
-    [DllImport("dwmapi.dll")]
-    private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref int value, int size);
 
     [DllImport("user32.dll")]
     private static extern IntPtr MonitorFromWindow(IntPtr windowHandle, uint flags);

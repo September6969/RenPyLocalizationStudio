@@ -21,7 +21,7 @@ public sealed class ImagePreviewViewModel : ObservableObject
     private bool _hasImages;
     private string _sceneTag = string.Empty;
     private string _statusHint = "选择包含 scene 或 show 的对白行即可自动预览画面";
-    private bool _isCollapsed;
+    private bool _isCollapsed = true;
 
     public ImagePreviewViewModel()
     {
@@ -309,7 +309,7 @@ public sealed partial class TranslationWorkspaceViewModel : WorkspaceViewModelBa
         Sidebar = new TranslationSidebarViewModel(this);
         Main = new TranslationMainContentViewModel(this);
         Inspector = new TranslationInspectorViewModel(session.Tasks);
-        ImagePreview = new ImagePreviewViewModel();
+        ImagePreview = new ImagePreviewViewModel { IsCollapsed = session.UiLayout.PreviewCollapsed };
         OpenSelectedCommand = new RelayCommand(OpenSelected);
         NavigateBookmarkCommand = new RelayCommand<ContentItem>(NavigateBookmarkToSource,
             item => ViewMode == TranslationViewMode.Bookmarks && item?.Node is not null);
@@ -319,6 +319,9 @@ public sealed partial class TranslationWorkspaceViewModel : WorkspaceViewModelBa
         MoveNextPendingCommand = new RelayCommand(MoveNextPending, () => VisibleItems.Any(IsPending));
         ToggleBookmarkCommand = new RelayCommand<ContentItem>(ToggleBookmark, item => item?.Node is not null);
         ClearSearchCommand = new RelayCommand(ClearFilters, () => HasActiveFilters);
+        Inspector.PreviousTranslationCommand = MovePreviousCommand;
+        Inspector.NextTranslationCommand = MoveNextCommand;
+        Inspector.SaveTranslationCommand = session.SaveCommand;
         RefreshResultsCommand = new RelayCommand(() => RebuildProjection(), () => _session.Snapshot is not null);
         Inspector.TranslationChanged += OnTranslationChanged;
         session.SnapshotChanged += OnSnapshotChanged;
@@ -595,6 +598,12 @@ public sealed partial class TranslationWorkspaceViewModel : WorkspaceViewModelBa
 
     private void OnSessionPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs args)
     {
+        if (args.PropertyName == nameof(ProjectSessionViewModel.UiLayout))
+        {
+            ImagePreview.IsCollapsed = _session.UiLayout.PreviewCollapsed;
+            OnPropertyChanged(nameof(UiLayoutPreferences));
+            return;
+        }
         if (args.PropertyName is not (nameof(ProjectSessionViewModel.ProjectPath) or nameof(ProjectSessionViewModel.Language))) return;
         RememberWorkspaceState();
         _stateScopeInvalidated = true;
