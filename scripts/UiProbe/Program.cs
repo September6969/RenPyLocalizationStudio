@@ -274,8 +274,8 @@ internal static class Program
         Console.WriteLine("Editorial four tabs rendered at 720/1100; glossary save, review selector, replacement checkbox, apply and undo verified.");
         typeof(MainWindow).GetMethod("UpdateResponsiveLayout", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.Invoke(window, [1920d]);
         Render(root, "window-1920", 1920);
-        var toolRows = new[] { new { Source = "images/x-scene.png", Target = "images/scene.png", Status = "待处理", OriginalSize = "1 MB", CompressedSize = "800 KB", Saving = "20%" } };
-        var toolData = new { Title = "工具预览", Description = "主题回归夹具", RelativeDirectory = "images", Prefix = "x-", Recursive = true, Quality = 85, MinimumSavingPercent = 5, OutputDirectory = "compressed", ReplaceOriginals = false, Summary = "1 项", Items = toolRows };
+        var toolRows = new[] { new ProbeToolRow { Source = "images/x-scene.png", Target = "images/scene.png", Status = "待处理", OriginalSize = "1 MB", CompressedSize = "800 KB", Saving = "20%" } };
+        var toolData = new ProbeToolData { Title = "工具预览", Description = "主题回归夹具", RelativeDirectory = "images", Prefix = "x-", Recursive = true, Quality = 85, MinimumSavingPercent = 5, OutputDirectory = "compressed", ReplaceOriginals = false, Summary = "1 项", Items = toolRows };
         foreach (var tool in new UserControl[] { new PrefixRenameToolView(), new ImageCompressionToolView() })
         {
             tool.DataContext = toolData;
@@ -285,7 +285,7 @@ internal static class Program
             Render(tool, tool.GetType().Name + "-selected", 1000);
             if (((SolidColorBrush)table.RowBackground).Color != ((SolidColorBrush)app.Resources["BackgroundLevel0"]).Color) throw new Exception("工具表格回落到系统背景");
         }
-        var rulesView = new ReplacementRulesDocumentView { DataContext = new { Rules = new[] { new { Enabled = true, Order = 1, Source = "Hello", Replacement = "你好", Description = "主题回归夹具" } } } };
+        var rulesView = new ReplacementRulesDocumentView { DataContext = new { Rules = new[] { new ProbeRule { Enabled = true, Order = 1, Source = "Hello", Replacement = "你好", Description = "主题回归夹具" } } } };
         Render(rulesView, "replacement-rules", 1000);
         Console.WriteLine("Prefix rename, image compression and replacement-rule grids render with shared dark styles.");
         main.CurrentWorkspace = diagnostics;
@@ -315,6 +315,39 @@ internal static class Program
         encoder.Frames.Add(BitmapFrame.Create(image));
         using var stream = File.Create(Path.Combine(OutputDirectory, name + ".png"));
         encoder.Save(stream);
+    }
+
+    // 输入控件使用双向绑定，夹具属性与实际视图模型一样可写。
+    private sealed class ProbeToolRow
+    {
+        public string Source { get; set; } = "";
+        public string Target { get; set; } = "";
+        public string Status { get; set; } = "";
+        public string OriginalSize { get; set; } = "";
+        public string CompressedSize { get; set; } = "";
+        public string Saving { get; set; } = "";
+    }
+    private sealed class ProbeToolData
+    {
+        public string Title { get; set; } = "";
+        public string Description { get; set; } = "";
+        public string RelativeDirectory { get; set; } = "";
+        public string Prefix { get; set; } = "";
+        public bool Recursive { get; set; }
+        public int Quality { get; set; }
+        public int MinimumSavingPercent { get; set; }
+        public string OutputDirectory { get; set; } = "";
+        public bool ReplaceOriginals { get; set; }
+        public string Summary { get; set; } = "";
+        public ProbeToolRow[] Items { get; set; } = [];
+    }
+    private sealed class ProbeRule
+    {
+        public bool Enabled { get; set; }
+        public int Order { get; set; }
+        public string Source { get; set; } = "";
+        public string Replacement { get; set; } = "";
+        public string Description { get; set; } = "";
     }
 
     private sealed class Analysis : IProjectAnalysisService
