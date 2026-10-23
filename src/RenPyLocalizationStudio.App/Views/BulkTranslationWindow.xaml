@@ -16,8 +16,7 @@
   </WrapPanel>
   <TextBlock Grid.Row="1" Text="{Binding Message}" TextWrapping="Wrap" Margin="0,4,0,12"/>
   <DataGrid Grid.Row="2" ItemsSource="{Binding Rows}" SelectedItem="{Binding SelectedRow}" AutoGenerateColumns="False" CanUserAddRows="False" CanUserDeleteRows="False"
-    RowHeight="32" EnableRowVirtualization="True" EnableColumnVirtualization="True" Background="{DynamicResource BackgroundLevel1}" RowBackground="{DynamicResource BackgroundLevel1}"
-    Foreground="{DynamicResource TextPrimaryBrush}" HeadersVisibility="Column" SelectionMode="Single">
+    RowHeight="32" EnableRowVirtualization="True" EnableColumnVirtualization="True" HeadersVisibility="Column" SelectionMode="Single">
    <DataGrid.Columns>
     <DataGridTemplateColumn Header="采用" Width="50"><DataGridTemplateColumn.CellTemplate><DataTemplate>
      <CheckBox IsChecked="{Binding IsSelected, UpdateSourceTrigger=PropertyChanged}" IsEnabled="{Binding CanApply}" HorizontalAlignment="Center"/>

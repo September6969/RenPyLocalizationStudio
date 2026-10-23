@@ -29,6 +29,8 @@ jobs:
         run: dotnet build RenPyLocalizationStudio.sln -c Release --no-restore
       - name: Test
         run: dotnet test RenPyLocalizationStudio.sln -c Release --no-build
+      - name: Verify WPF workspace controls
+        run: dotnet run --project scripts/UiProbe -c Release -- artifacts/ui-verification
       - name: Cache Ren'Py SDK and tool downloads
         uses: actions/cache@v4
         with:

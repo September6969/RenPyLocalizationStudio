@@ -10,8 +10,8 @@
                 <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="250">
                     <TextBlock Text="&#xE8A5;" FontFamily="Segoe Fluent Icons" FontSize="30" Opacity="0.2"
                                HorizontalAlignment="Center" Foreground="{DynamicResource TextMutedBrush}" />
-                    <TextBlock Text="请在剧情流中选择节点以编辑译文" Margin="0,12,0,0" TextAlignment="Center"
-                               FontSize="11" Foreground="{DynamicResource TextSubtleBrush}" Opacity="0.75" TextWrapping="Wrap" />
+                    <TextBlock Text="选择条目以编辑译文" Margin="0,12,0,0" TextAlignment="Center"
+                               FontSize="{StaticResource FontSizeCaption}" Foreground="{DynamicResource TextSubtleBrush}" Opacity="0.75" TextWrapping="Wrap" />
                 </StackPanel>
             </Grid>
         </DataTemplate>
@@ -20,13 +20,13 @@
             <Grid Margin="0,12,0,0">
                 <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
                 <TextBlock Text="{Binding Title}" FontWeight="SemiBold" Foreground="{DynamicResource DialogueTextBrush}" TextWrapping="Wrap" />
-                <TextBlock Grid.Row="1" Text="{Binding Details}" Margin="0,5,0,0" FontSize="11"
+                <TextBlock Grid.Row="1" Text="{Binding Details}" Margin="0,5,0,0" FontSize="{StaticResource FontSizeCaption}"
                            Foreground="{DynamicResource PathTextBrush}" TextWrapping="Wrap" />
                 <StackPanel Grid.Row="2" HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="250">
                     <TextBlock Text="&#xE8FD;" FontFamily="Segoe Fluent Icons" FontSize="26" Opacity="0.2"
                                HorizontalAlignment="Center" Foreground="{DynamicResource TextMutedBrush}" />
                     <TextBlock Text="这是流程节点，没有可编辑译文" Margin="0,10,0,0" TextAlignment="Center"
-                               FontSize="11" Foreground="{DynamicResource TextSubtleBrush}" />
+                               FontSize="{StaticResource FontSizeCaption}" Foreground="{DynamicResource TextSubtleBrush}" />
                 </StackPanel>
             </Grid>
         </DataTemplate>
@@ -35,20 +35,20 @@
             <Grid DataContext="{Binding Owner}" Margin="0,10,0,0">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
-                    <RowDefinition Height="Auto"/><RowDefinition Height="*"/>
+                    <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
                     <RowDefinition Height="Auto"/>
-                    <RowDefinition Height="Auto"/><RowDefinition Height="*"/>
+                    <RowDefinition Height="Auto"/><RowDefinition Height="*" MinHeight="120"/>
                     <RowDefinition Height="Auto"/>
                 </Grid.RowDefinitions>
                 
-                <StackPanel><TextBlock Text="{Binding Title}" FontWeight="SemiBold" Foreground="{DynamicResource DialogueTextBrush}" TextWrapping="Wrap" /><TextBlock Text="{Binding EditorialHint}" TextWrapping="Wrap" Foreground="{DynamicResource TextSubtleBrush}" FontSize="11" /></StackPanel>
-                <TextBlock Grid.Row="1" Text="{Binding Location}" Margin="0,3,0,12" FontSize="11" Foreground="{DynamicResource PathTextBrush}" TextWrapping="Wrap" />
+                <StackPanel><TextBlock Text="{Binding Title}" FontWeight="SemiBold" Foreground="{DynamicResource DialogueTextBrush}" TextWrapping="Wrap" /><TextBlock Text="{Binding EditorialHint}" TextWrapping="Wrap" Foreground="{DynamicResource TextSubtleBrush}" FontSize="{StaticResource FontSizeCaption}" /></StackPanel>
+                <TextBlock Grid.Row="1" Text="{Binding Location}" Margin="0,3,0,12" FontSize="{StaticResource FontSizeCaption}" Foreground="{DynamicResource PathTextBrush}" TextWrapping="Wrap" />
                 
-                <TextBlock Grid.Row="2" Text="原文" FontSize="11" FontWeight="Medium" Foreground="{DynamicResource TextMutedBrush}" Margin="0,0,0,4" />
-                <Border Grid.Row="3" Background="{DynamicResource BackgroundLevel1}" CornerRadius="4" Padding="8,6">
-                    <avalonEdit:TextEditor IsReadOnly="True" WordWrap="True" ShowLineNumbers="False"
+                <TextBlock Grid.Row="2" Text="原文" FontSize="{StaticResource FontSizeCaption}" FontWeight="Medium" Foreground="{DynamicResource TextMutedBrush}" Margin="0,0,0,4" />
+                <Border Grid.Row="3" MaxHeight="148" Background="{DynamicResource BackgroundLevel1}" CornerRadius="4" Padding="8,6">
+                    <avalonEdit:TextEditor MinHeight="40" VerticalScrollBarVisibility="Auto" IsReadOnly="True" WordWrap="True" ShowLineNumbers="False"
                                            Background="Transparent" Foreground="{DynamicResource DialogueTextBrush}"
-                                           FontFamily="Cascadia Code, Cascadia Mono, Consolas" FontSize="13"
+                                           FontFamily="Cascadia Code, Cascadia Mono, Consolas" FontSize="{StaticResource FontSizeBody}"
                                            behaviors:AvalonEditBindingBehavior.BindableText="{Binding SourceText, Mode=OneWay}"
                                            behaviors:AvalonEditBindingBehavior.DocumentKey="{Binding DocumentKey}" />
                 </Border>
@@ -66,25 +66,29 @@
                                         <Setter Property="IsEnabled" Value="False" />
                                     </DataTrigger></Style.Triggers>
                                 </Style></Button.Style>
-                                <TextBlock Text="{Binding}" Foreground="{DynamicResource BrandAccentBrush}" FontFamily="Cascadia Code, Consolas" FontSize="11" />
+                                <TextBlock Text="{Binding}" Foreground="{DynamicResource BrandAccentBrush}" FontFamily="Cascadia Code, Consolas" FontSize="{StaticResource FontSizeCaption}" />
                             </Button>
                         </DataTemplate>
                     </ItemsControl.ItemTemplate>
                 </ItemsControl>
                 
-                <TextBlock Grid.Row="5" Text="译文  ·  Ctrl+S 保存 / Alt+↑↓ 切换" TextWrapping="Wrap" FontSize="11" FontWeight="Medium" Foreground="{DynamicResource TextMutedBrush}" Margin="0,8,0,4" />
-                <Border Grid.Row="6" Background="{DynamicResource BackgroundLevel0}" BorderBrush="{DynamicResource BackgroundLevel1}" BorderThickness="1" CornerRadius="4" Padding="8,6">
+                <TextBlock Grid.Row="5" Text="译文" TextWrapping="Wrap" FontSize="{StaticResource FontSizeCaption}" FontWeight="Medium" Foreground="{DynamicResource TextMutedBrush}" Margin="0,8,0,4" />
+                <Border Grid.Row="6" Background="{DynamicResource BackgroundLevel0}" BorderBrush="{DynamicResource BorderDefaultBrush}" BorderThickness="1" CornerRadius="4" Padding="8,6">
                     <avalonEdit:TextEditor x:Name="TranslationEditor" WordWrap="True" ShowLineNumbers="False"
                                            Background="Transparent" Foreground="{DynamicResource DialogueTextBrush}"
-                                           FontFamily="{StaticResource StudioReadingFontFamily}" FontSize="15"
+                                           FontFamily="{StaticResource StudioReadingFontFamily}" FontSize="{StaticResource FontSizeSubtitle}"
                                            behaviors:AvalonEditBindingBehavior.BindableText="{Binding TranslationText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                                            behaviors:AvalonEditBindingBehavior.DocumentKey="{Binding DocumentKey}"
                                            behaviors:AvalonEditBindingBehavior.IsReadOnly="{Binding IsReadOnly}"
                                            behaviors:AvalonEditBindingBehavior.FocusRequest="{Binding FocusRequest}" />
                 </Border>
                 
-                <StackPanel Grid.Row="7" Margin="0,8,0,0">
-                    <Expander Header="{Binding SuggestionsHeading}" Foreground="{DynamicResource TextSubtleBrush}" Margin="0,0,0,8"
+                <ScrollViewer Grid.Row="7" MaxHeight="220" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"><StackPanel Margin="0,8,0,0">
+                    <Grid Margin="0,0,0,8"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                        <TextBlock Text="{Binding CharacterSummary}" FontSize="{StaticResource FontSizeCaption}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center"><TextBlock.Style><Style TargetType="TextBlock"><Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}"/><Style.Triggers><DataTrigger Binding="{Binding IsTranslationLong}" Value="True"><Setter Property="Foreground" Value="{DynamicResource SemanticWarningBrush}"/></DataTrigger></Style.Triggers></Style></TextBlock.Style></TextBlock>
+                        <StackPanel Grid.Column="1" Orientation="Horizontal"><Button Content="↑" Command="{Binding PreviousTranslationCommand}" Style="{StaticResource GhostButtonStyle}" Padding="6,2" ToolTip="上一条译文 · Alt+↑" AutomationProperties.Name="上一条译文"/><Button Content="↓" Command="{Binding NextTranslationCommand}" Style="{StaticResource GhostButtonStyle}" Padding="6,2" ToolTip="下一条译文 · Alt+↓" AutomationProperties.Name="下一条译文"/><Button Content="保存" Command="{Binding SaveTranslationCommand}" Style="{StaticResource GhostButtonStyle}" Padding="6,2" ToolTip="保存译文 · Ctrl+S"/></StackPanel>
+                    </Grid>
+                    <Expander IsExpanded="True" Header="{Binding SuggestionsHeading}" Foreground="{DynamicResource TextSubtleBrush}" Margin="0,0,0,8"
                               Visibility="{Binding HasSuggestions, Converter={StaticResource BooleanToVisibilityConverter}}">
                         <ScrollViewer MaxHeight="160" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
                             <ItemsControl ItemsSource="{Binding Suggestions}" Tag="{Binding ElementName=TranslationEditor}">
@@ -99,19 +103,19 @@
                                         </Style></Button.Style>
                                         <StackPanel>
                                             <TextBlock Text="{Binding Translation}" TextWrapping="Wrap" Foreground="{DynamicResource DialogueTextBrush}" />
-                                            <TextBlock Text="{Binding Description}" TextWrapping="Wrap" FontSize="10" Margin="0,4,0,0" Foreground="{DynamicResource TextMutedBrush}" />
+                                            <TextBlock Text="{Binding Description}" TextWrapping="Wrap" FontSize="{StaticResource FontSizeCaption}" Margin="0,4,0,0" Foreground="{DynamicResource TextMutedBrush}" />
                                         </StackPanel>
                                     </Button>
                                 </DataTemplate></ItemsControl.ItemTemplate>
                             </ItemsControl>
                         </ScrollViewer>
                     </Expander>
-                    <TextBlock Text="{Binding Impact}" Foreground="{DynamicResource BrandAccentBrush}" FontSize="12" TextWrapping="Wrap" />
-                    <TextBlock Text="{Binding ValidationMessage}" Foreground="{DynamicResource SemanticErrorBrush}" FontSize="12" TextWrapping="Wrap" Margin="0,4,0,0" />
+                    <Border Style="{StaticResource InfoBarStyle}" Margin="0,4,0,0" Visibility="{Binding HasImpact, Converter={StaticResource BooleanToVisibilityConverter}}"><TextBlock Text="{Binding Impact}" FontSize="{StaticResource FontSizeCaption}" TextWrapping="Wrap"/></Border>
+                    <Border Style="{StaticResource InfoBarStyle}" Background="{DynamicResource SemanticErrorSoftBrush}" BorderBrush="{DynamicResource SemanticErrorBrush}" Margin="0,4,0,0" Visibility="{Binding HasValidationMessage, Converter={StaticResource BooleanToVisibilityConverter}}"><TextBlock Text="{Binding ValidationMessage}" TextWrapping="Wrap" FontSize="{StaticResource FontSizeCaption}"/></Border>
                     <Button Content="统一冲突译文" Command="{Binding UnifyConflictCommand}" Style="{StaticResource GhostButtonStyle}"
                             HorizontalAlignment="Left" Margin="0,6,0,0" Padding="12,6"
                             Visibility="{Binding HasConflict, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                </StackPanel>
+                </StackPanel></ScrollViewer>
             </Grid>
         </DataTemplate>
 
@@ -122,7 +126,7 @@
     </UserControl.Resources>
     <Grid Margin="14,12">
         <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
-        <TextBlock Text="翻译检查器" FontSize="15" FontWeight="SemiBold" />
+        <Border BorderBrush="{DynamicResource BorderSubtleBrush}" BorderThickness="0,0,0,1" Padding="0,0,0,10"><TextBlock Text="翻译检查器" Style="{StaticResource SubtitleTextStyle}"/></Border>
         <ContentControl Grid.Row="1" Content="{Binding CurrentInspectorState}"
                         ContentTemplateSelector="{StaticResource InspectorTemplateSelector}" />
     </Grid>

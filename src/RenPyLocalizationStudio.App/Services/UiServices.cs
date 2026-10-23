@@ -197,6 +197,7 @@ public static class ModernDialog
             win.Content = border;
             win.MouseLeftButtonDown += (_, e) => { if (e.ButtonState == System.Windows.Input.MouseButtonState.Pressed) win.DragMove(); };
 
+            win.SourceInitialized += (_, _) => WindowThemeHelper.ApplyDarkChrome(win);
             win.ShowDialog();
             return result;
         });
@@ -316,6 +317,7 @@ public static class ModernDialog
             win.Content = border;
             win.MouseLeftButtonDown += (_, e) => { if (e.ButtonState == System.Windows.Input.MouseButtonState.Pressed) win.DragMove(); };
 
+            win.SourceInitialized += (_, _) => WindowThemeHelper.ApplyDarkChrome(win);
             win.ShowDialog();
         });
     }
@@ -340,8 +342,39 @@ public sealed class ConfirmationService : IConfirmationService
         ModernDialog.ShowAlert(title, message, image);
 }
 
-public sealed class ThemeService : IThemeService
+public sealed class ThemeService : IThemeService, IDisposable
 {
+    private readonly Dictionary<string, object> _darkPalette = new(StringComparer.Ordinal);
+    public ThemeService()
+    {
+        foreach (var dictionary in Application.Current.Resources.MergedDictionaries)
+            foreach (var key in dictionary.Keys.OfType<string>())
+                if (dictionary[key] is SolidColorBrush brush) _darkPalette[key] = brush;
+        SystemParameters.StaticPropertyChanged += OnSystemAppearanceChanged;
+        RefreshSystemPalette();
+    }
+    private void OnSystemAppearanceChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName is nameof(SystemParameters.HighContrast) or nameof(SystemParameters.ClientAreaAnimation))
+            Application.Current.Dispatcher.Invoke(RefreshSystemPalette);
+    }
+    private void RefreshSystemPalette()
+    {
+        _colorTimer?.Stop(); _colorTimer = null;
+        var resources = Application.Current.Resources;
+        foreach (var (key, value) in _darkPalette) resources[key] = value;
+        if (SystemParameters.HighContrast)
+        {
+            foreach (var key in _darkPalette.Keys)
+                resources[key] = key.StartsWith("Background", StringComparison.Ordinal) || key.Contains("Surface", StringComparison.Ordinal) || key.Contains("Soft", StringComparison.Ordinal)
+                    ? SystemColors.WindowBrush : SystemColors.WindowTextBrush;
+            resources["CodeEditorSurfaceBrush"] = SystemColors.WindowBrush;
+            resources["CodeEditorBorderBrush"] = SystemColors.WindowTextBrush;
+        }
+        if (TryParseAccentColor(AccentColor, out var color)) ApplyInstantColor(color);
+        foreach (Window window in Application.Current.Windows) WindowThemeHelper.ApplyDarkChrome(window, window is MainWindow);
+    }
+    public void Dispose() { SystemParameters.StaticPropertyChanged -= OnSystemAppearanceChanged; _colorTimer?.Stop(); _colorTimer = null; }
     private System.Windows.Threading.DispatcherTimer? _colorTimer;
     private Color _startColor;
     private Color _targetColor;
@@ -373,7 +406,8 @@ public sealed class ThemeService : IThemeService
             fromColor = accent;
         }
 
-        if (fromColor == accent)
+        _colorTimer?.Stop(); _colorTimer = null;
+        if (fromColor == accent || !SystemParameters.ClientAreaAnimation || SystemParameters.HighContrast)
         {
             ApplyInstantColor(accent);
             return true;
@@ -424,13 +458,33 @@ public sealed class ThemeService : IThemeService
     private static void ApplyInstantColor(Color c)
     {
         var resources = Application.Current.Resources;
+        if (SystemParameters.HighContrast)
+        {
+            resources["BrandAccentBrush"] = SystemColors.HighlightBrush;
+            resources["BrandAccentHoverBrush"] = SystemColors.HighlightBrush;
+            resources["BrandAccentSoftBrush"] = SystemColors.WindowBrush;
+            resources["BrandAccentForegroundBrush"] = SystemColors.HighlightTextBrush;
+            resources["FocusRingBrush"] = SystemColors.HighlightBrush;
+            // 高对比度下软背景沿用系统窗口色，边框与指示线使用系统高亮色。
+            return;
+        }
         var main = new SolidColorBrush(c); main.Freeze();
         var hover = new SolidColorBrush(Blend(c, Colors.White, 0.16)); hover.Freeze();
         var soft = new SolidColorBrush(Color.FromArgb(45, c.R, c.G, c.B)); soft.Freeze();
         resources["BrandAccentBrush"] = main;
         resources["BrandAccentHoverBrush"] = hover;
         resources["BrandAccentSoftBrush"] = soft;
+        var foreground = new SolidColorBrush(AccentForeground(c)); foreground.Freeze();
+        resources["BrandAccentForegroundBrush"] = foreground;
+        resources["FocusRingBrush"] = main;
     }
+
+    internal static double RelativeLuminance(Color color)
+    {
+        static double Channel(byte value) { var s = value / 255d; return s <= 0.04045 ? s / 12.92 : Math.Pow((s + 0.055) / 1.055, 2.4); }
+        return 0.2126 * Channel(color.R) + 0.7152 * Channel(color.G) + 0.0722 * Channel(color.B);
+    }
+    internal static Color AccentForeground(Color color) => RelativeLuminance(color) > 0.179 ? Colors.Black : Colors.White;
 
     private static Color Blend(Color source, Color target, double amount) => Color.FromRgb(
         (byte)(source.R + (target.R - source.R) * amount),
@@ -450,7 +504,7 @@ public sealed record AppSettings(
     string? LastTranslationItemId = null,
     string? LastTranslationViewMode = null,
     string? LastTranslationGroupingMode = null,
-    IReadOnlyList<TranslationWorkspaceState>? TranslationWorkspaces = null);
+    IReadOnlyList<TranslationWorkspaceState>? TranslationWorkspaces = null, UiLayoutSettings? UiLayout = null);
 
 public sealed class AppSettingsStore
 {

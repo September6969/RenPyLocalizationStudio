@@ -10,6 +10,8 @@ namespace RenPyLocalizationStudio.App;
 /// <summary>应用程序组合根。</summary>
 public partial class App : Application
 {
+    private ThemeService? _theme;
+    protected override void OnExit(ExitEventArgs e) { _theme?.Dispose(); base.OnExit(e); }
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
@@ -18,7 +20,7 @@ public partial class App : Application
         var processRunner = new ProcessRunnerService();
         var confirmation = new ConfirmationService();
         var dialogs = new FileDialogService();
-        var theme = new ThemeService();
+        var theme = _theme = new ThemeService();
         var settings = new AppSettingsStore();
         var tasks = new TaskCenterViewModel();
         var taskCoordinator = new WorkspaceTaskCoordinator(exception =>

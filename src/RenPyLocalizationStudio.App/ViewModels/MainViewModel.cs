@@ -126,7 +126,7 @@ public sealed class MainViewModel : ObservableObject, IRecipient<NavigateToSourc
     private void OnSessionPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs args)
     {
         if (args.PropertyName == nameof(ProjectSessionViewModel.ProjectName)) OnPropertyChanged(nameof(WindowTitle));
-        if (args.PropertyName == nameof(ProjectSessionViewModel.AutoSaveEnabled) &&
+        if (args.PropertyName is nameof(ProjectSessionViewModel.AutoSaveEnabled) or nameof(ProjectSessionViewModel.UiLayout) &&
             !string.IsNullOrWhiteSpace(Session.ProjectPath))
             ScheduleSettingsPersistence();
     }

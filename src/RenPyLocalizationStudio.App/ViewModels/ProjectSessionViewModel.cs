@@ -154,11 +154,15 @@ public sealed class ProjectSessionViewModel : ObservableObject
         {
             if (!SetProperty(ref _snapshot, value)) return;
             SnapshotChanged?.Invoke(this, value);
+            OnPropertyChanged(nameof(HasUnsavedChanges));
             NotifyCommandStates();
         }
     }
 
     public bool CanAnalyze => !string.IsNullOrWhiteSpace(ProjectPath) && !string.IsNullOrWhiteSpace(Language) && !Tasks.IsBusy;
+    private UiLayoutSettings _uiLayout = new();
+    public UiLayoutSettings UiLayout { get => _uiLayout; private set => SetProperty(ref _uiLayout, value); }
+    public void UpdateUiLayout(UiLayoutSettings layout) => UiLayout = layout.Normalize();
     public bool HasUnsavedChanges => Snapshot?.TranslationUnits.Any(unit => unit.IsDirty) == true;
 
     public string SdkPath
@@ -175,6 +179,7 @@ public sealed class ProjectSessionViewModel : ObservableObject
             Tasks.Logs.Add(new ToolLogEntry(diagnostic.Message, diagnostic.Severity == DiagnosticSeverity.Error ? "Error" : "Warning"));
         if (load.Status == OperationStatus.Failed)
             Tasks.StatusMessage = load.Diagnostics.FirstOrDefault()?.Message ?? "设置读取失败，已使用默认设置。";
+        UiLayout = (saved.UiLayout ?? new()).Normalize();
         _theme.TryApplyAccent(saved.AccentColor, out _);
         if (!string.IsNullOrWhiteSpace(saved.SdkPath)) _sdkPath = saved.SdkPath;
         AutoSaveEnabled = saved.AutoSaveEnabled;
@@ -288,6 +293,7 @@ public sealed class ProjectSessionViewModel : ObservableObject
     /// <summary>译文发生变化时启动可取消的防抖自动保存。</summary>
     public void ScheduleAutoSave()
     {
+        OnPropertyChanged(nameof(HasUnsavedChanges));
         if (!AutoSaveEnabled || Snapshot is null || _taskCoordinator is null) return;
         var revision = Interlocked.Increment(ref _autoSaveRevision);
         _taskCoordinator.StartLatestAfterDelay(
@@ -321,7 +327,7 @@ public sealed class ProjectSessionViewModel : ObservableObject
                 AutoSaveEnabled,
                 positionIsCurrent ? _lastTranslationItemId : null,
                 positionIsCurrent ? _lastTranslationViewMode : null,
-                positionIsCurrent ? _lastTranslationGroupingMode : null, _workspaceStates.Values.ToArray()), cancellationToken);
+                positionIsCurrent ? _lastTranslationGroupingMode : null, _workspaceStates.Values.ToArray(), UiLayout), cancellationToken);
             return true;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -381,7 +387,10 @@ public sealed class ProjectSessionViewModel : ObservableObject
         {
             // 部分文件已提交时，也要让筛选与脏状态反映实际落盘结果。
             if (result.Value?.Files.Any(file => file.Status == SaveFileStatus.Saved) == true)
+            {
+                OnPropertyChanged(nameof(HasUnsavedChanges));
                 SaveCompleted?.Invoke(this, EventArgs.Empty);
+            }
             if (result.Status != OperationStatus.Cancelled && showDiagnostics)
             {
                 var diagnostics = result.Diagnostics.Count > 0
@@ -406,6 +415,7 @@ public sealed class ProjectSessionViewModel : ObservableObject
         Tasks.StatusMessage = reloadAfterSave
             ? $"已{(forceOverwrite ? "强制覆盖" : "安全")}保存 {result.Value?.SavedFiles ?? 0} 个文件；正在重新加载。"
             : $"自动保存完成：{result.Value?.SavedFiles ?? 0} 个文件。";
+        OnPropertyChanged(nameof(HasUnsavedChanges));
         SaveCompleted?.Invoke(this, EventArgs.Empty);
         if (reloadAfterSave)
         {

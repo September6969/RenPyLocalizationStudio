@@ -9,6 +9,7 @@ public partial class BulkTranslationWindow : Window
     public BulkTranslationWindow(TranslationWorkspaceViewModel workspace)
     {
         InitializeComponent();
+        SourceInitialized += (_, _) => Services.WindowThemeHelper.ApplyDarkChrome(this);
         DataContext = _model = new(workspace);
         Loaded += async (_, _) => await _model.RefreshCommand.ExecuteAsync(null);
         Closed += (_, _) => _model.Dispose();
