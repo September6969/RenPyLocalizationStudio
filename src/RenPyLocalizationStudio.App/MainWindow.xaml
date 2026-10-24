@@ -54,7 +54,7 @@
                 <StackPanel Orientation="Horizontal">
                     <Button Command="{Binding Session.AnalyzeCommand}" Style="{StaticResource GhostButtonStyle}" ToolTip="分析当前项目" AutomationProperties.Name="分析项目"><StackPanel Orientation="Horizontal"><TextBlock FontFamily="Segoe Fluent Icons" Text="&#xE9D9;" Margin="0,0,6,0"/><TextBlock Text="分析"/></StackPanel></Button>
                     <Button Command="{Binding Session.SaveCommand}" Style="{StaticResource PrimaryButtonStyle}" Margin="4,0,0,0" ToolTip="保存译文 · Ctrl+S" AutomationProperties.Name="保存译文"><StackPanel Orientation="Horizontal"><TextBlock FontFamily="Segoe Fluent Icons" Text="&#xE74E;" Margin="0,0,6,0"/><TextBlock Text="保存"/><TextBlock Text=" •" Visibility="{Binding Session.HasUnsavedChanges, Converter={StaticResource BooleanToVisibilityConverter}}"/></StackPanel></Button>
-                    <Button x:Name="SaveMenuButton" Content="&#xE70D;" FontFamily="Segoe Fluent Icons" Style="{StaticResource GhostButtonStyle}" Padding="6,4" Click="OpenMenu_Click" AutomationProperties.Name="更多保存操作" ToolTip="更多保存操作">
+                    <Button x:Name="SaveMenuButton" Style="{StaticResource GhostButtonStyle}" Padding="6,4" Click="OpenMenu_Click" AutomationProperties.Name="更多保存操作" ToolTip="更多保存操作"><TextBlock Text="&#xE70D;" FontFamily="Segoe Fluent Icons"/>
                         <Button.ContextMenu><ContextMenu DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
                             <MenuItem Header="保存并刷新流程注释" Command="{Binding Session.SaveWithAnnotationsCommand}"/>
                             <Separator/>

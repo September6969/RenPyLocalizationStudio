@@ -45,7 +45,7 @@
                 <TextBlock Grid.Row="1" Text="{Binding Location}" Margin="0,3,0,12" FontSize="{StaticResource FontSizeCaption}" Foreground="{DynamicResource PathTextBrush}" TextWrapping="Wrap" />
                 
                 <TextBlock Grid.Row="2" Text="原文" FontSize="{StaticResource FontSizeCaption}" FontWeight="Medium" Foreground="{DynamicResource TextMutedBrush}" Margin="0,0,0,4" />
-                <Border Grid.Row="3" MaxHeight="148" Background="{DynamicResource BackgroundLevel1}" CornerRadius="4" Padding="8,6">
+                <Border Grid.Row="3" MaxHeight="148" Background="{DynamicResource BackgroundLevel1}" BorderBrush="{DynamicResource BorderSubtleBrush}" BorderThickness="1" CornerRadius="6" Padding="10,8">
                     <avalonEdit:TextEditor MinHeight="40" VerticalScrollBarVisibility="Auto" IsReadOnly="True" WordWrap="True" ShowLineNumbers="False"
                                            Background="Transparent" Foreground="{DynamicResource DialogueTextBrush}"
                                            FontFamily="Cascadia Code, Cascadia Mono, Consolas" FontSize="{StaticResource FontSizeBody}"
@@ -73,7 +73,17 @@
                 </ItemsControl>
                 
                 <TextBlock Grid.Row="5" Text="译文" TextWrapping="Wrap" FontSize="{StaticResource FontSizeCaption}" FontWeight="Medium" Foreground="{DynamicResource TextMutedBrush}" Margin="0,8,0,4" />
-                <Border Grid.Row="6" Background="{DynamicResource BackgroundLevel0}" BorderBrush="{DynamicResource BorderDefaultBrush}" BorderThickness="1" CornerRadius="4" Padding="8,6">
+                <Border Grid.Row="6" Background="{DynamicResource BackgroundLevel0}" BorderThickness="1" CornerRadius="6" Padding="10,8">
+                    <Border.Style>
+                        <Style TargetType="Border">
+                            <Setter Property="BorderBrush" Value="{DynamicResource BorderDefaultBrush}" />
+                            <Style.Triggers>
+                                <Trigger Property="IsKeyboardFocusWithin" Value="True">
+                                    <Setter Property="BorderBrush" Value="{DynamicResource FocusRingBrush}" />
+                                </Trigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Border.Style>
                     <avalonEdit:TextEditor x:Name="TranslationEditor" WordWrap="True" ShowLineNumbers="False"
                                            Background="Transparent" Foreground="{DynamicResource DialogueTextBrush}"
                                            FontFamily="{StaticResource StudioReadingFontFamily}" FontSize="{StaticResource FontSizeSubtitle}"

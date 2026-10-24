@@ -131,6 +131,8 @@ public sealed class ContentItem : ObservableObject
     public bool IsEditable => SharedString is not null || Unit is not null;
     public bool IsLabel => PresentationKind == ContentPresentationKind.Label;
     public bool IsDialogue => PresentationKind == ContentPresentationKind.Dialogue;
+    public string TranslatedPreview => SharedString is not null ? (SharedString.Translation ?? string.Empty).Trim() : Unit is not null ? ((Unit.IsRawMode ? Unit.RawBodyText : Unit.TranslationText) ?? string.Empty).Trim() : string.Empty;
+    public bool HasTranslatedPreview => IsDialogue && !string.IsNullOrWhiteSpace(TranslatedPreview);
     public bool IsGroupHeader => PresentationKind == ContentPresentationKind.GroupHeader;
     public bool IsTranslationComplete => SharedString is not null
         ? !SharedString.HasConflict && !string.IsNullOrWhiteSpace(SharedString.Translation)
@@ -261,6 +263,8 @@ public sealed class ContentItem : ObservableObject
         IsStatusVisible = visible;
         OnPropertyChanged(nameof(IsTranslationComplete));
         OnPropertyChanged(nameof(IsModified));
+        OnPropertyChanged(nameof(TranslatedPreview));
+        OnPropertyChanged(nameof(HasTranslatedPreview));
     }
 
     internal void SetBookmarked(bool value) => IsBookmarked = value;
